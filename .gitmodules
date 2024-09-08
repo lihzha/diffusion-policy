@@ -1,0 +1,3 @@
+[submodule "maniskill-submodule"]
+	path = maniskill-submodule
+	url = https://github.com/lihzha/ManiSkill.git
