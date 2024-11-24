@@ -16,10 +16,17 @@ from mani_skill.utils.scene_builder import SceneBuilder
 
 # TODO (stao): make the build and initialize api consistent with other scenes
 class TabletopSceneBuilder(SceneBuilder):
+    
+    def __init__(self, env, robot_init_qpos_noise=0.02, table_model_file=None, floor_texture_file=None):
+        super().__init__(env, robot_init_qpos_noise)
+        self.table_model_file = table_model_file
+        self.floor_texture_file = floor_texture_file 
+    
+        
     def build(self):
         builder = self.scene.create_actor_builder()
 
-        table_model_file = '/home/irom-lab/projects/guided-data-collection/guided_dc/assets/table/table_with_textured_top.obj'
+        table_model_file = self.table_model_file
         scale = 1
 
         table_pose = sapien.Pose(q=euler2quat(0, 0, 0))
@@ -53,10 +60,11 @@ class TabletopSceneBuilder(SceneBuilder):
         if self.scene.parallel_in_single_scene:
             floor_width = 500
         self.ground = build_ground(
-            self.scene, floor_width=floor_width, altitude=-self.table_height
+            self.scene, floor_width=floor_width, altitude=-self.table_height, texture_file=self.floor_texture_file
         )
         self.table = table
         self.scene_objects: List[sapien.Entity] = [self.table, self.ground]
+        
 
     def initialize(self, env_idx: torch.Tensor, robot_pos: sapien.Pose):
 
@@ -78,7 +86,7 @@ class TabletopSceneBuilder(SceneBuilder):
 
         b = len(env_idx)
         self.table.set_pose(
-            sapien.Pose(p=[0, 0, 0], q=euler2quat(0, 0, 0))
+            sapien.Pose(p=[0, 0, 0], q=euler2quat(0, 0, np.pi/2))
         )
         if self.env.robot_uids == "panda":
             qpos = np.array(
@@ -194,8 +202,3 @@ class TabletopSceneBuilder(SceneBuilder):
         ):
             # Need to specify the robot qpos for each sub-scenes using tensor api
             pass
-
-
-if __name__ == '__main__':
-
-    a = CustomTableSceneBuilder("PushCube-v1")

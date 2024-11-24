@@ -40,6 +40,8 @@ dependencies = [
     "omegaconf==2.3.0",
     "hydra-core==1.3.2",
     "moviepy==1.0.3",
+    # DPPO dependencies
+    "timm",
 ]
 
 [tool.setuptools.packages.find]

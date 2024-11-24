@@ -5,7 +5,7 @@ env_id: Drawer-v1
 obs_mode: none
 sim_backend: auto
 reward_mode: null
-num_envs: 5
+num_envs: 3
 control_mode: 'pd_ee_delta_pose'
 render_mode: human
 shader: default
@@ -109,14 +109,14 @@ Drawer-v1:
     object:
       pos_scale: 0.2
       pos_offset: 0.1
-      manip_obj_delta_zrot_max: 2.7
-      manip_obj_delta_zrot_min: 2.8
+      manip_obj_delta_zrot_max: 0
+      manip_obj_delta_zrot_min: 0
 
     goal:
-      low_percentage_x: 0.8
-      high_percentage_x: 1.1
-      low_percentage_y: 0.8
-      high_percentage_y: 1.1
+      low_percentage_x: 0
+      high_percentage_x: 0
+      low_percentage_y: 0.0
+      high_percentage_y: 0.0
 
 PushObject-v1:
 

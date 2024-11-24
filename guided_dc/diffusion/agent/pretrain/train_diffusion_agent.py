@@ -6,48 +6,86 @@ Pre-training diffusion policy
 import logging
 import wandb
 import numpy as np
-
+import torch
 log = logging.getLogger(__name__)
-from util.timer import Timer
+from utils.timer import Timer
 from agent.pretrain.train_agent import PreTrainAgent, batch_to_device
+from utils.preprocess_utils import batch_apply
+
+import time
+
+import GPUtil
 
 
 class TrainDiffusionAgent(PreTrainAgent):
 
     def __init__(self, cfg):
         super().__init__(cfg)
+        self.debug = cfg.debug
 
     def run(self):
 
         timer = Timer()
         self.epoch = 1
-        for _ in range(self.n_epochs):
-
+        for epoch in range(self.n_epochs):
+            if self.num_gpus > 1:
+                import torch.distributed as dist
+                dist.barrier()
+                self.dataloader_train.sampler.set_epoch(epoch)
             # train
             loss_train_epoch = []
             for batch_train in self.dataloader_train:
-                if self.dataset_train.device == "cpu":
-                    batch_train = batch_to_device(batch_train)
+                
+                # st = time.time()
+                batch_train = batch_apply(batch_train, lambda x: x.to(self.device, non_blocking=True))
+                batch_train = batch_apply(batch_train, lambda x: x.float())
+                
+                # log.info("GPU used for loading batch:")
+                # GPUtil.showUtilization(all=True)
+
+                # ebt = time.time()
+                # print('Batch preprocessing time:', time.time() - ebt)
 
                 self.model.train()
-                loss_train = self.model.loss(*batch_train)
+                if self.num_gpus > 1:
+                    loss_train = self.model.module.loss(*batch_train)
+                else:
+                    loss_train = self.model.loss(*batch_train)
+
+                # eft = time.time()
+                # print("Forward time: ", eft-ebt)
+
                 loss_train.backward()
+
+                # ebt = time.time()
+                # print("Backward time: ", ebt-eft)
+
                 loss_train_epoch.append(loss_train.item())
 
                 self.optimizer.step()
-                self.optimizer.zero_grad()
+                self.optimizer.zero_grad(set_to_none=True)
             loss_train = np.mean(loss_train_epoch)
 
+            del batch_train
             # validate
             loss_val_epoch = []
+            # if self.dataloader_val is None:
+            #     print("Error! No val dataloader")
+            # print(self.val_freq)
             if self.dataloader_val is not None and self.epoch % self.val_freq == 0:
-                self.model.eval()
-                for batch_val in self.dataloader_val:
-                    if self.dataset_val.device == "cpu":
-                        batch_val = batch_to_device(batch_val)
-                    loss_val, infos_val = self.model.loss(*batch_val)
-                    loss_val_epoch.append(loss_val.item())
-                self.model.train()
+                with torch.no_grad():
+                    self.dataloader_val.sampler.set_epoch(epoch)
+                    self.model.eval()
+                    for batch_val in self.dataloader_val:
+                        batch_val = batch_apply(batch_val, lambda x: x.to(self.device, non_blocking=True))
+                        batch_val = batch_apply(batch_val, lambda x: x.float())
+                        if self.num_gpus > 1:
+                            loss_val = self.model.module.loss(*batch_val)
+                        else:
+                            loss_val = self.model.loss(*batch_val)
+                        loss_val_epoch.append(loss_val.item())
+                    self.model.train()
+                    del batch_val
             loss_val = np.mean(loss_val_epoch) if len(loss_val_epoch) > 0 else None
 
             # update lr
@@ -58,18 +96,19 @@ class TrainDiffusionAgent(PreTrainAgent):
                 self.step_ema()
 
             # save model
-            if self.epoch % self.save_model_freq == 0 or self.epoch == self.n_epochs:
+            if (self.epoch % self.save_model_freq == 0 or self.epoch == self.n_epochs) and self.gpu_id == 0:
                 self.save_model()
 
             # log loss
-            if self.epoch % self.log_freq == 0:
+            if self.epoch % self.log_freq == 0 and self.gpu_id == 0:
+
                 log.info(
                     f"{self.epoch}: train loss {loss_train:8.4f} | t:{timer():8.4f}"
                 )
                 if self.use_wandb:
                     if loss_val is not None:
                         wandb.log(
-                            {"loss - val": loss_val}, step=self.epoch, commit=False
+                            {"loss - val": loss_val}, step=self.epoch, commit=True
                         )
                     wandb.log(
                         {
@@ -81,3 +120,14 @@ class TrainDiffusionAgent(PreTrainAgent):
 
             # count
             self.epoch += 1
+            
+            if self.num_gpus > 1:
+                dist.barrier()
+
+            if (self.debug and self.epoch == 2) and self.gpu_id == 0:
+                try:
+                    torch.cuda.memory._dump_snapshot(f"{self.cfg.train.batch_size}_mem_debug.pickle")
+                except Exception as e:
+                    logging.error(f"Failed to capture memory snapshot {e}")
+                # Stop recording memory snapshot history.
+                torch.cuda.memory._record_memory_history(enabled=None)

@@ -1,0 +1,89 @@
+"""
+Launcher for all experiments. Download pre-training data, normalization statistics, and pre-trained checkpoints if needed.
+
+"""
+
+import os
+import sys
+
+# import pretty_errors
+import logging
+
+import math
+import hydra
+from omegaconf import OmegaConf
+
+import torch
+import signal
+import torch.distributed as dist
+
+# allows arbitrary python code execution in configs using the ${eval:''} resolver
+OmegaConf.register_new_resolver("eval", eval, replace=True)
+OmegaConf.register_new_resolver("round_up", math.ceil)
+OmegaConf.register_new_resolver("round_down", math.floor)
+
+# suppress d4rl import error
+os.environ["D4RL_SUPPRESS_IMPORT_ERROR"] = "1"
+
+# add logger
+log = logging.getLogger(__name__)
+
+# use line-buffering for both stdout and stderr
+sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
+sys.stderr = open(sys.stderr.fileno(), mode="w", buffering=1)
+
+def cleanup():
+    if dist.is_initialized():
+        dist.destroy_process_group()
+        print("Process group destroyed.")
+        
+def signal_handler(sig, frame):
+    print(f"Received signal: {sig}. Cleaning up...")
+    cleanup()
+    exit(0)
+    
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+# Function to run in each process
+def _main(cfg: OmegaConf):
+    num_gpus = torch.cuda.device_count()
+    if num_gpus > 1:
+        from torch.distributed import init_process_group, destroy_process_group
+        def ddp_setup():
+            # os.environ["MASTER_ADDR"] = os.environ["SLURM_NODELIST"].split(",")[0]
+            # os.environ["MASTER_PORT"] = "29500"
+            # os.environ["NCCL_DEBUG"] = "INFO"
+            torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+            # torch.cuda.set_device(rank)
+            init_process_group(backend="nccl")
+        ddp_setup()
+        cfg['gpu_id'] = int(os.environ["LOCAL_RANK"])
+    else:
+        cfg['gpu_id'] = 0
+    
+    cfg['_target_'] = 'agent.val.val_diffusion_img_agent_real.ValImgDiffusionAgentReal'
+        
+    logging.info(cfg)
+    
+    # Initialize and run the agent
+    cls = hydra.utils.get_class(cfg._target_)
+    agent = cls(cfg)
+    agent.run()
+
+    if num_gpus > 1:
+        destroy_process_group()
+
+    
+@hydra.main(
+    config_path=os.path.join(
+        os.getcwd(), "guided_dc/cfg/real/pick_and_place"
+    ),  # possibly overwritten by --config-path
+    config_name="diffusion_unet_vit.yaml",
+)
+def main(cfg: OmegaConf):
+
+    _main(cfg)
+
+if __name__ == "__main__":
+    main()

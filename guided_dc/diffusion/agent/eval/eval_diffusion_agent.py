@@ -9,7 +9,7 @@ import torch
 import logging
 
 log = logging.getLogger(__name__)
-from util.timer import Timer
+from utils.timer import Timer
 from agent.eval.eval_agent import EvalAgent
 
 

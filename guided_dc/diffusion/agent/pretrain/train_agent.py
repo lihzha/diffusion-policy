@@ -14,9 +14,11 @@ import wandb
 from copy import deepcopy
 
 log = logging.getLogger(__name__)
-from util.scheduler import CosineAnnealingWarmupRestarts
+from utils.scheduler import CosineAnnealingWarmupRestarts
+import GPUtil
 
-DEVICE = "cuda:0"
+
+DEVICE = "cuda"
 
 
 def to_device(x, device=DEVICE):
@@ -28,7 +30,8 @@ def to_device(x, device=DEVICE):
         print(f"Unrecognized type in `to_device`: {type(x)}")
 
 
-def batch_to_device(batch, device="cuda:0"):
+def batch_to_device(batch, device="cuda"):
+
     vals = [to_device(getattr(batch, field), device) for field in batch._fields]
     return type(batch)(*vals)
 
@@ -65,9 +68,14 @@ class PreTrainAgent:
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
 
+        self.num_gpus = torch.cuda.device_count()
+        self.gpu_id = int(cfg.gpu_id)
+        
+        self.cfg = cfg
+
         # Wandb
         self.use_wandb = cfg.wandb is not None
-        if cfg.wandb is not None:
+        if cfg.wandb is not None and self.gpu_id == 0:
             wandb.init(
                 entity=cfg.wandb.entity,
                 project=cfg.wandb.project,
@@ -75,17 +83,53 @@ class PreTrainAgent:
                 config=OmegaConf.to_container(cfg, resolve=True),
             )
 
+        if cfg.debug:
+            if self.gpu_id == 0:
+                torch.cuda.memory._record_memory_history(
+                max_entries=100000
+            )
+
         # Build model
+        if self.num_gpus > 1:  
+            cfg.model.device = self.gpu_id
         self.model = hydra.utils.instantiate(cfg.model)
-        self.ema = EMA(cfg.ema)
-        self.ema_model = deepcopy(self.model)
+        
+
+        if self.num_gpus>1:
+            print(f"Using {self.num_gpus} GPUs.")
+            print(self.gpu_id)
+            from torch.utils.data.distributed import DistributedSampler
+            from torch.nn.parallel import DistributedDataParallel as DDP
+            self.model = self.model.to(self.gpu_id)
+            print("Initializing model on gpu")
+            self.model = DDP(self.model, device_ids=[self.gpu_id])   
+            print("DDP initialized on gpu")
+            self.device = torch.device(f"cuda:{self.gpu_id}")
+            self.ema = EMA(cfg.ema)
+            self.ema_model = deepcopy(self.model.module)
+            print("Ema model initialized")
+            # dist.barrier()
+        else:
+            self.model = self.model.to(cfg.device)
+            self.device = torch.device(cfg.device)
+            self.ema = EMA(cfg.ema)
+            self.ema_model = deepcopy(self.model)    
+
+        print(self.ema_model.device)
+        print("Model loaded, using gpu memory:")
+        if torch.cuda.is_available():
+            allocated_memory = torch.cuda.memory_allocated()
+            print(f"Allocated GPU memory after loading model: {allocated_memory} bytes")
+        GPUtil.showUtilization(all=True)
 
         # Training params
         self.n_epochs = cfg.train.n_epochs
         self.batch_size = cfg.train.batch_size
         self.update_ema_freq = cfg.train.update_ema_freq
         self.epoch_start_ema = cfg.train.epoch_start_ema
+
         self.val_freq = cfg.train.get("val_freq", 100)
+        self.val_batch_size = cfg.train.get("val_batch_size", self.batch_size)
 
         # Logging, checkpoints
         self.logdir = cfg.logdir
@@ -96,25 +140,102 @@ class PreTrainAgent:
 
         # Build dataset
         self.dataset_train = hydra.utils.instantiate(cfg.train_dataset)
-        self.dataloader_train = torch.utils.data.DataLoader(
-            self.dataset_train,
-            batch_size=self.batch_size,
-            num_workers=4 if self.dataset_train.device == "cpu" else 0,
-            shuffle=True,
-            pin_memory=True if self.dataset_train.device == "cpu" else False,
-        )
+        print("Dataset loaded, using gpu memory:")
+        GPUtil.showUtilization(all=True, useOldCode=False)
+        
+        if torch.cuda.is_available():
+            allocated_memory = torch.cuda.memory_allocated()
+            print(f"Allocated GPU memory after loading dataset: {allocated_memory} bytes")
+            
+        if cfg.train.store_gpu:
+            assert self.dataset_train.device != "cpu", self.dataset_train.device
+            if self.num_gpus == 1:
+                self.dataloader_train = torch.utils.data.DataLoader(
+                    self.dataset_train,
+                    batch_size=self.batch_size,
+                    num_workers=0,
+                    shuffle=True,
+                    pin_memory=False,
+                )
+            else:
+                self.dataloader_train = torch.utils.data.DataLoader(
+                    self.dataset_train,
+                    batch_size=self.batch_size,
+                    num_workers=0,
+                    shuffle=False,
+                    pin_memory=False,
+                    sampler=DistributedSampler(self.dataset_train)
+                )
+                log.info(f"Using distributed sampler")
+            log.info(f"Using GPU memory for dataset")
+        else:
+            if self.num_gpus == 1:
+                self.dataloader_train = torch.utils.data.DataLoader(
+                    self.dataset_train,
+                    batch_size=self.batch_size,
+                    num_workers=cfg.train.get("num_workers", 4),
+                    shuffle=True,
+                    pin_memory=True,
+                    persistent_workers=cfg.train.get("persistent_workers", False),
+                )
+            else:
+                self.dataloader_train = torch.utils.data.DataLoader(
+                    self.dataset_train,
+                    batch_size=self.batch_size,
+                    num_workers=cfg.train.get("num_workers", 4),
+                    shuffle=False,
+                    pin_memory=True,
+                    persistent_workers=cfg.train.get("persistent_workers", False),
+                    sampler=DistributedSampler(self.dataset_train)
+                )
+                log.info(f"Using distributed sampler")
+            log.info(f"Using CPU memory for dataset")
+        
+
         self.dataloader_val = None
         if "train_split" in cfg.train and cfg.train.train_split < 1:
             val_indices = self.dataset_train.set_train_val_split(cfg.train.train_split)
             self.dataset_val = deepcopy(self.dataset_train)
             self.dataset_val.set_indices(val_indices)
-            self.dataloader_val = torch.utils.data.DataLoader(
-                self.dataset_val,
-                batch_size=self.batch_size,
-                num_workers=4 if self.dataset_val.device == "cpu" else 0,
-                shuffle=True,
-                pin_memory=True if self.dataset_val.device == "cpu" else False,
-            )
+            if cfg.train.store_gpu:
+                assert self.dataset_val.device != "cpu", self.dataset_val.device
+                if self.num_gpus == 1:
+                    self.dataloader_val = torch.utils.data.DataLoader(
+                        self.dataset_val,
+                        batch_size=self.val_batch_size,
+                        num_workers=0,
+                        shuffle=True,
+                        pin_memory=False,
+                    )
+                else:
+                    self.dataloader_val = torch.utils.data.DataLoader(
+                        self.dataset_val,
+                        batch_size=self.val_batch_size,
+                        num_workers=0,
+                        shuffle=False,
+                        pin_memory=False,
+                        sampler=DistributedSampler(self.dataset_val)
+                    )
+            else:
+                if self.num_gpus == 1:
+                    self.dataloader_val = torch.utils.data.DataLoader(
+                        self.dataset_val,
+                        batch_size=self.val_batch_size,
+                        num_workers=cfg.train.get("num_workers", 4),
+                        shuffle=True,
+                        pin_memory=True,
+                        persistent_workers=cfg.train.get("persistent_workers", False),
+                    )
+                else:
+                    self.dataloader_val = torch.utils.data.DataLoader(
+                        self.dataset_val,
+                        batch_size=self.val_batch_size,
+                        num_workers=cfg.train.get("num_workers", 4),
+                        shuffle=False,
+                        pin_memory=True,
+                        persistent_workers=cfg.train.get("persistent_workers", False),
+                        sampler=DistributedSampler(self.dataset_val)
+                    )
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=cfg.train.learning_rate,
@@ -135,13 +256,19 @@ class PreTrainAgent:
         raise NotImplementedError
 
     def reset_parameters(self):
-        self.ema_model.load_state_dict(self.model.state_dict())
+        if self.num_gpus > 1:
+            self.ema_model.load_state_dict(self.model.module.state_dict())
+        else:
+            self.ema_model.load_state_dict(self.model.state_dict())
 
     def step_ema(self):
         if self.epoch < self.epoch_start_ema:
             self.reset_parameters()
             return
-        self.ema.update_model_average(self.ema_model, self.model)
+        if self.num_gpus > 1:
+            self.ema.update_model_average(self.ema_model, self.model.module)
+        else:
+            self.ema.update_model_average(self.ema_model, self.model)
 
     def save_model(self):
         """
@@ -149,8 +276,9 @@ class PreTrainAgent:
         """
         data = {
             "epoch": self.epoch,
-            "model": self.model.state_dict(),
+            "model": self.model.state_dict() if self.num_gpus == 1 else self.model.module.state_dict(),
             "ema": self.ema_model.state_dict(),
+            # "cfg": self.cfg,
         }
         savepath = os.path.join(self.checkpoint_dir, f"state_{self.epoch}.pt")
         torch.save(data, savepath)
@@ -164,5 +292,9 @@ class PreTrainAgent:
         data = torch.load(loadpath, weights_only=True)
 
         self.epoch = data["epoch"]
-        self.model.load_state_dict(data["model"])
-        self.ema_model.load_state_dict(data["ema"])
+        if self.num_gpus == 1:
+            self.model.load_state_dict(data["model"])
+            self.ema_model.load_state_dict(data["ema"])
+        else:
+            self.model.module.load_state_dict(data["model"])
+            self.ema_model.load_state_dict(data["ema"])

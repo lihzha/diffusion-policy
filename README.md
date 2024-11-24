@@ -14,7 +14,32 @@ git submodule update --init --recursive
 source install.sh
 ```
 
-## Usage
+3. Set up path variables.
+```console
+./guided_dc/diffusion/scripts/set_path.sh
+```
+
+## Usage for training diffusion policy
+
+### Single GPU
+
+Modify task cfg file `guided_dc/cfg/real/diffusion_unet_vit.yaml` or `guided_dc/cfg/real/diffusion_unet_resnet.yaml` to try different training configurations, e.g., larger ViT.
+
+```console
+cd guided_dc
+sbatch scripts/single.sh
+```
+
+### Multi GPU
+
+Note that in `guided_dc/diffusion/multi_gpu.sh`, nproc_per_node should match the number of requested GPUs. The multi gpu version uses DistributedDataParallel to leverage multiple GPUs for training: it creates multiple processes, each with one GPU, and copy the same model to all processes. During each forward and backward, it splits the original batch into mini-batches and pass each mini-batch to a process. Losses and gradients are computed parallely for all mini-batches, and gradients are then averaged to back propogate models on all processes simutaneously.  
+
+```console
+cd guided_dc
+sbatch scripts/single.sh
+```
+
+## Usage for simulation
 
 ### Running a task
 
@@ -27,3 +52,5 @@ python guided_dc/scripts/random_action.py env_id=PickAndPlace-v1 num_envs=5
 ### Defining a task
 
 All tasks are defined under the folder `envs/tasks`. To define a custom task, you can follow the template in `envs/tasks/push_objects.py`.
+
+

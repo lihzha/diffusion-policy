@@ -35,7 +35,7 @@ class VisionDiffusionMLP(nn.Module):
         spatial_emb=0,
         visual_feature_dim=128,
         dropout=0,
-        num_img=1,
+        # num_img=1,
         augment=False,
     ):
         super().__init__()
@@ -45,28 +45,29 @@ class VisionDiffusionMLP(nn.Module):
         if augment:
             self.aug = RandomShiftsAug(pad=4)
         self.augment = augment
-        self.num_img = num_img
+        # self.num_img = num_img
         self.img_cond_steps = img_cond_steps
         if spatial_emb > 0:
             assert spatial_emb > 1, "this is the dimension"
-            if num_img > 1:
-                self.compress1 = SpatialEmb(
-                    num_patch=self.backbone.num_patch,
-                    patch_dim=self.backbone.patch_repr_dim,
-                    prop_dim=cond_dim,
-                    proj_dim=spatial_emb,
-                    dropout=dropout,
-                )
-                self.compress2 = deepcopy(self.compress1)
-            else:  # TODO: clean up
-                self.compress = SpatialEmb(
-                    num_patch=self.backbone.num_patch,
-                    patch_dim=self.backbone.patch_repr_dim,
-                    prop_dim=cond_dim,
-                    proj_dim=spatial_emb,
-                    dropout=dropout,
-                )
-            visual_feature_dim = spatial_emb * num_img
+            # if num_img > 1:
+            #     self.compress1 = SpatialEmb(
+            #         num_patch=self.backbone.num_patch,
+            #         patch_dim=self.backbone.patch_repr_dim,
+            #         prop_dim=cond_dim,
+            #         proj_dim=spatial_emb,
+            #         dropout=dropout,
+            #     )
+            #     self.compress2 = deepcopy(self.compress1)
+            # else:  # TODO: clean up
+            self.compress = SpatialEmb(
+                num_patch=self.backbone.num_patch,
+                patch_dim=self.backbone.patch_repr_dim,
+                prop_dim=cond_dim,
+                proj_dim=spatial_emb,
+                dropout=dropout,
+            )
+            # visual_feature_dim = spatial_emb * num_img
+            visual_feature_dim = spatial_emb
         else:
             self.compress = nn.Sequential(
                 nn.Linear(self.backbone.repr_dim, visual_feature_dim),
@@ -115,7 +116,10 @@ class VisionDiffusionMLP(nn.Module):
         TODO long term: more flexible handling of cond
         """
         B, Ta, Da = x.shape
-        _, T_rgb, C, H, W = cond["rgb"].shape
+        # if isinstance(cond["rgb"], dict):
+        #     _, T_rgb, C, H, W = next(iter(cond["rgb"].values())).shape
+        # else:
+        #     _, T_rgb, C, H, W = cond["rgb"].shape
 
         # flatten chunk
         x = x.view(B, -1)
@@ -124,41 +128,49 @@ class VisionDiffusionMLP(nn.Module):
         state = cond["state"].view(B, -1)
 
         # Take recent images --- sometimes we want to use fewer img_cond_steps than cond_steps (e.g., 1 image but 3 prio)
-        rgb = cond["rgb"][:, -self.img_cond_steps :]
+        rgb = cond["rgb"].copy()
+        for k, v in rgb.items():
+            rgb[k] = v[:, -self.img_cond_steps :].clone()
+            rgb[k] = einops.rearrange(rgb[k], "b t c h w -> b (t c) h w")
+            rgb[k] = rgb[k].float()
+            if self.augment:
+                rgb[k] = self.aug(rgb[k])
 
-        # concatenate images in cond by channels
-        if self.num_img > 1:
-            rgb = rgb.reshape(B, T_rgb, self.num_img, 3, H, W)
-            rgb = einops.rearrange(rgb, "b t n c h w -> b n (t c) h w")
+        # rgb = cond["rgb"][:, -self.img_cond_steps :]
+
+        ## concatenate images in cond by channels
+        # if self.num_img > 1:
+        #     rgb = rgb.reshape(B, T_rgb, self.num_img, 3, H, W)
+        #     rgb = einops.rearrange(rgb, "b t n c h w -> b n (t c) h w")
+        # else:
+        # rgb = einops.rearrange(rgb, "b t c h w -> b (t c) h w")
+
+        ## convert rgb to float32 for augmentation
+        # rgb = rgb.float()
+
+        # # get vit output - pass in two images separately
+        # if self.num_img > 1:  # TODO: properly handle multiple images
+        #     rgb1 = rgb[:, 0]
+        #     rgb2 = rgb[:, 1]
+        #     if self.augment:
+        #         rgb1 = self.aug(rgb1)
+        #         rgb2 = self.aug(rgb2)
+        #     feat1 = self.backbone(rgb1)
+        #     feat2 = self.backbone(rgb2)
+        #     feat1 = self.compress1.forward(feat1, state)
+        #     feat2 = self.compress2.forward(feat2, state)
+        #     feat = torch.cat([feat1, feat2], dim=-1)
+        # else:  # single image
+        # if self.augment:
+        #     rgb = self.aug(rgb)
+        feat = self.backbone(rgb) # [batch, num_patch, embed_dim]
+
+        # compress
+        if isinstance(self.compress, SpatialEmb):
+            feat = self.compress.forward(feat, state)
         else:
-            rgb = einops.rearrange(rgb, "b t c h w -> b (t c) h w")
-
-        # convert rgb to float32 for augmentation
-        rgb = rgb.float()
-
-        # get vit output - pass in two images separately
-        if self.num_img > 1:  # TODO: properly handle multiple images
-            rgb1 = rgb[:, 0]
-            rgb2 = rgb[:, 1]
-            if self.augment:
-                rgb1 = self.aug(rgb1)
-                rgb2 = self.aug(rgb2)
-            feat1 = self.backbone(rgb1)
-            feat2 = self.backbone(rgb2)
-            feat1 = self.compress1.forward(feat1, state)
-            feat2 = self.compress2.forward(feat2, state)
-            feat = torch.cat([feat1, feat2], dim=-1)
-        else:  # single image
-            if self.augment:
-                rgb = self.aug(rgb)
-            feat = self.backbone(rgb)
-
-            # compress
-            if isinstance(self.compress, SpatialEmb):
-                feat = self.compress.forward(feat, state)
-            else:
-                feat = feat.flatten(1, -1)
-                feat = self.compress(feat)
+            feat = feat.flatten(1, -1)
+            feat = self.compress(feat)
         cond_encoded = torch.cat([feat, state], dim=-1)
 
         # append time and cond

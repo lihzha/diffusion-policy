@@ -1,0 +1,9 @@
+including:
+
+1. task generation: task type, what objects to use (e.g., apple, microwave), success criteria
+# we should also have an caterogy-level randomization built in the environment initialization process (e.g., red/green apple)
+# we also need to consider what other datasets we can use
+
+2. high-level planner: a task tree
+
+tree, motion planning, object physical properties to randomize

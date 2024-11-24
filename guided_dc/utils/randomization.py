@@ -2,14 +2,17 @@ import random
 import torch
 import numpy as np
 
-def randomize_continuous(min, max, size: int):
+def randomize_continuous(min, max, size: int, return_list=False):
     '''
     Return a list with length 'size', with each element's value within the interval [min, max].
     '''
     if size > 1:
         return [random.uniform(min, max) for _ in range(size)]
     else:
-        return random.uniform(min, max)
+        if return_list:
+            return [random.uniform(min, max)]
+        else:
+            return random.uniform(min, max)
 
 def randomize_by_percentage(array, low_percentage=0.9, high_percentage=1.1):
     """

@@ -22,6 +22,7 @@ from model.diffusion.sampling import (
 )
 
 from collections import namedtuple
+
 Sample = namedtuple("Sample", "trajectories chains")
 
 
@@ -34,7 +35,7 @@ class DiffusionModel(nn.Module):
         obs_dim,
         action_dim,
         network_path=None,
-        device="cuda:0",
+        device="cuda",
         # Various clipping
         denoised_clip_value=1.0,
         randn_clip_value=10,
@@ -50,7 +51,10 @@ class DiffusionModel(nn.Module):
         **kwargs,
     ):
         super().__init__()
+        if isinstance(device, int):
+            device = f"cuda:{device}"    
         self.device = device
+        print("Device: ", device)
         self.horizon_steps = horizon_steps
         self.obs_dim = obs_dim
         self.action_dim = action_dim
@@ -74,15 +78,20 @@ class DiffusionModel(nn.Module):
         # Set up models
         self.network = network.to(device)
         if network_path is not None:
-            checkpoint = torch.load(network_path, map_location=device, weights_only=True)
-            if "ema" in checkpoint:
-                self.load_state_dict(checkpoint["ema"], strict=False)
-                logging.info("Loaded SL-trained policy from %s", network_path)
-            else:
-                self.load_state_dict(checkpoint["model"], strict=False)
-                logging.info("Loaded RL-trained policy from %s", network_path)
+            checkpoint = torch.load(
+                network_path, map_location=device, weights_only=True
+            )
+            # if "ema" in checkpoint:
+            #     self.load_state_dict(checkpoint["ema"], strict=False)
+            #     logging.info("Loaded SL-trained policy from %s", network_path)
+            # else:
+            self.load_state_dict(checkpoint["model"], strict=True)
+            logging.info("Loaded RL-trained policy from %s", network_path)
         logging.info(
-            f"Number of network parameters: {sum(p.numel() for p in self.parameters())}"
+            f"Number of network parameters: {sum(p.numel() for p in self.parameters()) - sum(p.numel() for p in self.network.backbone.parameters())}"
+        )
+        logging.info(
+            f"Number of visual encoder parameters: {sum(p.numel() for p in self.network.backbone.parameters())}"
         )
 
         """
@@ -140,24 +149,38 @@ class DiffusionModel(nn.Module):
         In DDIM paper https://arxiv.org/pdf/2010.02502, alpha is alpha_cumprod in DDPM https://arxiv.org/pdf/2102.09672
         """
         if use_ddim:
+            logging.info("Using DDIM")
             assert predict_epsilon, "DDIM requires predicting epsilon for now."
-            if ddim_discretize == 'uniform':    # use the HF "leading" style
+            if ddim_discretize == "uniform":  # use the HF "leading" style
                 step_ratio = self.denoising_steps // ddim_steps
-                self.ddim_t = torch.arange(0, ddim_steps, device=self.device) * step_ratio
+                self.ddim_t = (
+                    torch.arange(0, ddim_steps, device=self.device) * step_ratio
+                )
             else:
-                raise 'Unknown discretization method for DDIM.'
-            self.ddim_alphas = self.alphas_cumprod[self.ddim_t].clone().to(torch.float32)
+                raise "Unknown discretization method for DDIM."
+            self.ddim_alphas = (
+                self.alphas_cumprod[self.ddim_t].clone().to(torch.float32)
+            )
             self.ddim_alphas_sqrt = torch.sqrt(self.ddim_alphas)
-            self.ddim_alphas_prev = torch.cat([
-                torch.tensor([1.]).to(torch.float32).to(self.device), 
-                self.alphas_cumprod[self.ddim_t[:-1]]])
-            self.ddim_sqrt_one_minus_alphas = (1. - self.ddim_alphas) ** .5
+            self.ddim_alphas_prev = torch.cat(
+                [
+                    torch.tensor([1.0]).to(torch.float32).to(self.device),
+                    self.alphas_cumprod[self.ddim_t[:-1]],
+                ]
+            )
+            self.ddim_sqrt_one_minus_alphas = (1.0 - self.ddim_alphas) ** 0.5
 
             # Initialize fixed sigmas for inference - eta=0
             ddim_eta = 0
-            self.ddim_sigmas = (ddim_eta * \
-                    ((1 - self.ddim_alphas_prev) / (1 - self.ddim_alphas) * \
-                    (1 - self.ddim_alphas / self.ddim_alphas_prev)) ** .5)
+            self.ddim_sigmas = (
+                ddim_eta
+                * (
+                    (1 - self.ddim_alphas_prev)
+                    / (1 - self.ddim_alphas)
+                    * (1 - self.ddim_alphas / self.ddim_alphas_prev)
+                )
+                ** 0.5
+            )
 
             # Flip all
             self.ddim_t = torch.flip(self.ddim_t, [0])
@@ -314,9 +337,9 @@ class DiffusionModel(nn.Module):
         # Predict
         x_recon = self.network(x_noisy, t, cond=cond)
         if self.predict_epsilon:
-            return F.mse_loss(x_recon, noise, reduction="mean") 
+            return F.mse_loss(x_recon, noise, reduction="mean")
         else:
-            return F.mse_loss(x_recon, x_noisy, reduction="mean")
+            return F.mse_loss(x_recon, x_start, reduction="mean")
 
     def q_sample(self, x_start, t, noise=None):
         """
