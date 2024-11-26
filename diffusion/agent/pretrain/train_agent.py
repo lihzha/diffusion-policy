@@ -13,10 +13,10 @@ import logging
 import wandb
 from copy import deepcopy
 
-log = logging.getLogger(__name__)
 from guided_dc.utils.scheduler import CosineAnnealingWarmupRestarts
-import GPUtil
 
+log = logging.getLogger(__name__)
+import GPUtil
 
 DEVICE = "cuda"
 
@@ -70,7 +70,7 @@ class PreTrainAgent:
 
         self.num_gpus = torch.cuda.device_count()
         self.gpu_id = int(cfg.gpu_id)
-        
+
         self.cfg = cfg
 
         # Wandb
@@ -85,24 +85,22 @@ class PreTrainAgent:
 
         if cfg.debug:
             if self.gpu_id == 0:
-                torch.cuda.memory._record_memory_history(
-                max_entries=100000
-            )
+                torch.cuda.memory._record_memory_history(max_entries=100000)
 
         # Build model
-        if self.num_gpus > 1:  
+        if self.num_gpus > 1:
             cfg.model.device = self.gpu_id
         self.model = hydra.utils.instantiate(cfg.model)
-        
 
-        if self.num_gpus>1:
+        if self.num_gpus > 1:
             print(f"Using {self.num_gpus} GPUs.")
             print(self.gpu_id)
             from torch.utils.data.distributed import DistributedSampler
             from torch.nn.parallel import DistributedDataParallel as DDP
+
             self.model = self.model.to(self.gpu_id)
             print("Initializing model on gpu")
-            self.model = DDP(self.model, device_ids=[self.gpu_id])   
+            self.model = DDP(self.model, device_ids=[self.gpu_id])
             print("DDP initialized on gpu")
             self.device = torch.device(f"cuda:{self.gpu_id}")
             self.ema = EMA(cfg.ema)
@@ -113,7 +111,7 @@ class PreTrainAgent:
             self.model = self.model.to(cfg.device)
             self.device = torch.device(cfg.device)
             self.ema = EMA(cfg.ema)
-            self.ema_model = deepcopy(self.model)    
+            self.ema_model = deepcopy(self.model)
 
         print(self.ema_model.device)
         print("Model loaded, using gpu memory:")
@@ -142,11 +140,13 @@ class PreTrainAgent:
         self.dataset_train = hydra.utils.instantiate(cfg.train_dataset)
         print("Dataset loaded, using gpu memory:")
         GPUtil.showUtilization(all=True, useOldCode=False)
-        
+
         if torch.cuda.is_available():
             allocated_memory = torch.cuda.memory_allocated()
-            print(f"Allocated GPU memory after loading dataset: {allocated_memory} bytes")
-            
+            print(
+                f"Allocated GPU memory after loading dataset: {allocated_memory} bytes"
+            )
+
         if cfg.train.store_gpu:
             assert self.dataset_train.device != "cpu", self.dataset_train.device
             if self.num_gpus == 1:
@@ -164,7 +164,7 @@ class PreTrainAgent:
                     num_workers=0,
                     shuffle=False,
                     pin_memory=False,
-                    sampler=DistributedSampler(self.dataset_train)
+                    sampler=DistributedSampler(self.dataset_train),
                 )
                 log.info(f"Using distributed sampler")
             log.info(f"Using GPU memory for dataset")
@@ -186,11 +186,10 @@ class PreTrainAgent:
                     shuffle=False,
                     pin_memory=True,
                     persistent_workers=cfg.train.get("persistent_workers", False),
-                    sampler=DistributedSampler(self.dataset_train)
+                    sampler=DistributedSampler(self.dataset_train),
                 )
                 log.info(f"Using distributed sampler")
             log.info(f"Using CPU memory for dataset")
-        
 
         self.dataloader_val = None
         if "train_split" in cfg.train and cfg.train.train_split < 1:
@@ -214,7 +213,7 @@ class PreTrainAgent:
                         num_workers=0,
                         shuffle=False,
                         pin_memory=False,
-                        sampler=DistributedSampler(self.dataset_val)
+                        sampler=DistributedSampler(self.dataset_val),
                     )
             else:
                 if self.num_gpus == 1:
@@ -234,7 +233,7 @@ class PreTrainAgent:
                         shuffle=False,
                         pin_memory=True,
                         persistent_workers=cfg.train.get("persistent_workers", False),
-                        sampler=DistributedSampler(self.dataset_val)
+                        sampler=DistributedSampler(self.dataset_val),
                     )
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
@@ -276,7 +275,11 @@ class PreTrainAgent:
         """
         data = {
             "epoch": self.epoch,
-            "model": self.model.state_dict() if self.num_gpus == 1 else self.model.module.state_dict(),
+            "model": (
+                self.model.state_dict()
+                if self.num_gpus == 1
+                else self.model.module.state_dict()
+            ),
             "ema": self.ema_model.state_dict(),
             # "cfg": self.cfg,
         }

@@ -6,7 +6,8 @@ Can be learned but always fixed to 1 during training and 0 during eval right now
 """
 
 import torch
-from model.common.mlp import MLP
+
+from diffusion.model.common.mlp import MLP
 
 
 class EtaFixed(torch.nn.Module):

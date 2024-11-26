@@ -3,7 +3,6 @@ ViT image encoder implementation from IBRL, https://github.com/hengyuan-hu/ibrl
 
 """
 
-from typing import List
 import einops
 import torch
 from torch import nn
@@ -26,7 +25,6 @@ class VitEncoder(nn.Module):
         share_embed_head=False,
         num_views=3,
         use_large_patch=False,
-        
     ):
         super().__init__()
         self.vit = MinVit(
@@ -50,14 +48,16 @@ class VitEncoder(nn.Module):
         self.embed_dim = embed_dim
 
     def forward(self, obs) -> torch.Tensor:
-        feats: torch.Tensor = self.vit.forward(obs) # [batch, num_patch, embed_dim]
+        feats: torch.Tensor = self.vit.forward(obs)  # [batch, num_patch, embed_dim]
         return feats
 
 
 class PatchEmbed1(nn.Module):
     def __init__(self, embed_dim, num_channel=3, img_h=240, img_w=320, patch_size=8):
         super().__init__()
-        self.conv = nn.Conv2d(num_channel, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.conv = nn.Conv2d(
+            num_channel, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
         self.num_patch = math.ceil(img_h / patch_size) * math.ceil(img_w / patch_size)
         self.patch_dim = embed_dim
 
@@ -66,12 +66,15 @@ class PatchEmbed1(nn.Module):
         y = einops.rearrange(y, "b c h w -> b (h  w) c")
         return y
 
+
 class PatchEmbed2(nn.Module):
-    def __init__(self, embed_dim, use_norm, num_channel=3, img_h=240, img_w=320, patch_size=8):
+    def __init__(
+        self, embed_dim, use_norm, num_channel=3, img_h=240, img_w=320, patch_size=8
+    ):
         super().__init__()
-        coef = patch_size//8
-        ks1 = 8*coef
-        stride1 = 4*coef
+        coef = patch_size // 8
+        ks1 = 8 * coef
+        stride1 = 4 * coef
         ks2 = 3
         stride2 = 2
         layers = [
@@ -93,54 +96,76 @@ class PatchEmbed2(nn.Module):
         y = einops.rearrange(y, "b c h w -> b (h  w) c")
         return y
 
+
 class MultiViewPatchEmbed(nn.Module):
-    def __init__(self, embed_dim, num_channel=3, img_h=240, img_w=320, embed_style='embed2', num_views=3, use_norm=True, share_embed_head=False, img_cond_steps=1, patch_size=8, use_large_patch=False):
+    def __init__(
+        self,
+        embed_dim,
+        num_channel=3,
+        img_h=240,
+        img_w=320,
+        embed_style="embed2",
+        num_views=3,
+        use_norm=True,
+        share_embed_head=False,
+        img_cond_steps=1,
+        patch_size=8,
+        use_large_patch=False,
+    ):
         super().__init__()
         if not share_embed_head:
             self.forward = self.forward_loop
             if embed_style == "embed1":
-                self.embed_layers = nn.ModuleList([PatchEmbed1(
-                        embed_dim,
-                        num_channel=num_channel,
-                        img_h=img_h,
-                        img_w=img_w,
-                        patch_size=patch_size,
-                    ) for _ in range(num_views)]
-                    )
+                self.embed_layers = nn.ModuleList(
+                    [
+                        PatchEmbed1(
+                            embed_dim,
+                            num_channel=num_channel,
+                            img_h=img_h,
+                            img_w=img_w,
+                            patch_size=patch_size,
+                        )
+                        for _ in range(num_views)
+                    ]
+                )
             elif embed_style == "embed2":
-                self.embed_layers = nn.ModuleList([PatchEmbed2(
-                        embed_dim,
-                        use_norm=use_norm,
-                        num_channel=num_channel,
-                        img_h=img_h,
-                        img_w=img_w,
-                        patch_size=patch_size,
-                    ) for _ in range(num_views)]
-                    )
+                self.embed_layers = nn.ModuleList(
+                    [
+                        PatchEmbed2(
+                            embed_dim,
+                            use_norm=use_norm,
+                            num_channel=num_channel,
+                            img_h=img_h,
+                            img_w=img_w,
+                            patch_size=patch_size,
+                        )
+                        for _ in range(num_views)
+                    ]
+                )
             else:
-                raise ValueError('Invalid patch embedding style.')
+                raise ValueError("Invalid patch embedding style.")
         else:
             self.forward = self.forward_batch
             if embed_style == "embed1":
                 self.embed_layers = PatchEmbed1(
-                        embed_dim,
-                        num_channel=num_channel,
-                        img_h=img_h,
-                        img_w=img_w,
-                        patch_size=patch_size,
-                    )
-                    
+                    embed_dim,
+                    num_channel=num_channel,
+                    img_h=img_h,
+                    img_w=img_w,
+                    patch_size=patch_size,
+                )
+
             elif embed_style == "embed2":
                 self.embed_layers = PatchEmbed2(
-                        embed_dim,
-                        use_norm=use_norm,
-                        num_channel=num_channel,
-                        img_h=img_h,
-                        img_w=img_w,
-                        patch_size=patch_size,
-                    )
+                    embed_dim,
+                    use_norm=use_norm,
+                    num_channel=num_channel,
+                    img_h=img_h,
+                    img_w=img_w,
+                    patch_size=patch_size,
+                )
             else:
-                raise ValueError('Invalid patch embedding style.')
+                raise ValueError("Invalid patch embedding style.")
         self.num_views = num_views
         self.img_cond_steps = img_cond_steps
         self.img_h = img_h
@@ -148,19 +173,33 @@ class MultiViewPatchEmbed(nn.Module):
         self.embed_dim = embed_dim
         self.use_large_patch = use_large_patch
         if use_large_patch:
-            self.num_patch = self.embed_layers[0].num_patch * num_views * img_cond_steps if isinstance(self.embed_layers, nn.ModuleList) else self.embed_layers.num_patch * num_views * img_cond_steps
+            self.num_patch = (
+                self.embed_layers[0].num_patch * num_views * img_cond_steps
+                if isinstance(self.embed_layers, nn.ModuleList)
+                else self.embed_layers.num_patch * num_views * img_cond_steps
+            )
         else:
-            self.num_patch = self.embed_layers[0].num_patch if isinstance(self.embed_layers, nn.ModuleList) else self.embed_layers.num_patch
+            self.num_patch = (
+                self.embed_layers[0].num_patch
+                if isinstance(self.embed_layers, nn.ModuleList)
+                else self.embed_layers.num_patch
+            )
         self.test_patch_embed()
 
     def test_patch_embed(self):
-        x = {f'{i}': torch.rand(2*self.img_cond_steps, 3, self.img_h, self.img_w) for i in range(self.num_views)}
+        x = {
+            f"{i}": torch.rand(2 * self.img_cond_steps, 3, self.img_h, self.img_w)
+            for i in range(self.num_views)
+        }
         y = self.forward(x)
         if self.use_large_patch:
             assert y.size() == (2, self.num_patch, self.embed_dim), y.size()
         else:
-            assert y.size() == (2*self.img_cond_steps*self.num_views, self.num_patch, self.embed_dim)
-        
+            assert y.size() == (
+                2 * self.img_cond_steps * self.num_views,
+                self.num_patch,
+                self.embed_dim,
+            )
 
     def forward_loop(self, x: dict):
         patch_embds = []
@@ -169,19 +208,30 @@ class MultiViewPatchEmbed(nn.Module):
             patch_embds.append(y)
         if self.use_large_patch:
             ret = torch.cat(patch_embds, dim=0)  # (v b cs) p d
-            return einops.rearrange(ret, "(v b cs) p d -> b (cs v p) d", v=self.num_views, cs=self.img_cond_steps)
+            return einops.rearrange(
+                ret,
+                "(v b cs) p d -> b (cs v p) d",
+                v=self.num_views,
+                cs=self.img_cond_steps,
+            )
         else:
             return torch.cat(patch_embds, dim=0)  # (v b cs) p d
-    
+
     def forward_batch(self, x: dict):
         # x is a dict with keys as view names and values as images. Concatenate the images along the batch dimension and reshape to (batch, patch_nums, embed_dim) after passing through the embedding layer.
         x = torch.cat(list(x.values()), dim=0)
-        y = self.embed_layers(x)   # (v b cs) p d
+        y = self.embed_layers(x)  # (v b cs) p d
         # y = einops.rearrange(y, "(b cs v) p d -> b (cs v p) d", b=b, cs=self.img_cond_steps, v=self.num_views)
         if self.use_large_patch:
-            y = einops.rearrange(y, "(v b cs) p d -> b (cs v p) d", v=self.num_views, cs=self.img_cond_steps)
+            y = einops.rearrange(
+                y,
+                "(v b cs) p d -> b (cs v p) d",
+                v=self.num_views,
+                cs=self.img_cond_steps,
+            )
         return y
-        
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(self, embed_dim, num_head):
         super().__init__()
@@ -207,6 +257,7 @@ class MultiHeadAttention(nn.Module):
         attn_v = einops.rearrange(attn_v, "b h t d -> b t (h d)")
         return self.out_proj(attn_v)
 
+
 class TransformerLayer(nn.Module):
     def __init__(self, embed_dim, num_head, dropout):
         super().__init__()
@@ -227,6 +278,7 @@ class TransformerLayer(nn.Module):
     def _ff_block(self, x):
         x = self.linear2(nn.functional.gelu(self.linear1(x)))
         return x
+
 
 class MinVit(nn.Module):
     def __init__(
@@ -260,13 +312,11 @@ class MinVit(nn.Module):
             patch_size=patch_size,
             use_large_patch=use_large_patch,
         )
-                 
+
         self.num_patch = self.patch_embed.num_patch
 
-        self.pos_embed = nn.Parameter(
-            torch.zeros(1, self.num_patch, embed_dim)
-        )
-        
+        self.pos_embed = nn.Parameter(torch.zeros(1, self.num_patch, embed_dim))
+
         layers = [
             TransformerLayer(embed_dim, num_head, dropout=0) for _ in range(depth)
         ]
@@ -280,8 +330,8 @@ class MinVit(nn.Module):
     def forward(self, x):
         x = self.patch_embed(x)  # [batch, num_patch*img_cond_steps]
         x = x + self.pos_embed
-        x = self.net(x) # [batch, num_patch, embed_dim]
-        return self.norm(x) # [batch, num_patch, embed_dim]
+        x = self.net(x)  # [batch, num_patch, embed_dim]
+        return self.norm(x)  # [batch, num_patch, embed_dim]
 
 
 def init_weights_vit_timm(module: nn.Module, name: str = ""):
@@ -348,14 +398,25 @@ if __name__ == "__main__":
     # )
     # x = {key: torch.rand(64, *obs_shape) * 255 for key in [f"view{i}" for i in range(num_views)]}
 
-    
     # print("input size:", x.keys())
     # print("embed_size", enc.vit.patch_embed(x).size())
     # print("output size:", enc(x, flatten=False).size())
     # print("repr dim:", enc.repr_dim, ", real dim:", enc(x, flatten=True).size())
-    pm = MultiViewPatchEmbed(128, num_channel=3, img_h=88, img_w=88, embed_style='embed2', num_views=2, use_norm=False, share_embed_head=False, img_cond_steps=2, patch_size=8, use_large_patch=True)
+    pm = MultiViewPatchEmbed(
+        128,
+        num_channel=3,
+        img_h=88,
+        img_w=88,
+        embed_style="embed2",
+        num_views=2,
+        use_norm=False,
+        share_embed_head=False,
+        img_cond_steps=2,
+        patch_size=8,
+        use_large_patch=True,
+    )
     # pm = PatchEmbed2(128, use_norm=0, num_channel=3, img_h=240, img_w=320, patch_size=8)
-    x = {f'{i}': torch.rand(10, 3, 88, 88) for i in range(3)}
+    x = {f"{i}": torch.rand(10, 3, 88, 88) for i in range(3)}
     y = pm(x)
     print(y.size())
     breakpoint()

@@ -34,7 +34,7 @@ class VisionDiffusionMLP(nn.Module):
         # vision
         self.backbone = backbone
         visual_feature_dim = backbone.repr_dim
-        
+
         # diffusion
         input_dim = (
             time_dim + action_dim * horizon_steps + visual_feature_dim + cond_dim
@@ -116,7 +116,7 @@ class VisionDiffusionMLP(nn.Module):
         # else:  # single image
         # if self.augment:
         #     rgb = self.aug(rgb)
-        feat = self.backbone(rgb, state) # [batch, num_patch, embed_dim]
+        feat = self.backbone(rgb, state)  # [batch, num_patch, embed_dim]
         cond_encoded = torch.cat([feat, state], dim=-1)
 
         # append time and cond

@@ -3,7 +3,6 @@ Parent eval agent class.
 
 """
 
-import os
 import numpy as np
 import torch
 import hydra
@@ -13,13 +12,11 @@ import random
 log = logging.getLogger(__name__)
 
 
-
 class ValAgentReal:
 
     def __init__(self, cfg):
         super().__init__()
-        
-        
+
         self.cfg = cfg
         self.gpu_id = int(cfg.gpu_id)
         self.device = f"cuda:{self.gpu_id}" if torch.cuda.is_available() else "cpu"
@@ -27,7 +24,6 @@ class ValAgentReal:
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
-
 
         self.n_cond_step = cfg.cond_steps
         self.obs_dim = cfg.obs_dim
@@ -51,6 +47,6 @@ class ValAgentReal:
         )
 
         self.batch_size = cfg.batch_size
-        
+
     def run(self):
         pass

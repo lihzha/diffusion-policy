@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 
 from multiprocessing.managers import SharedMemoryManager
 
+
 class EvalDiffusionAgentReal:
 
     def __init__(self, cfg):
@@ -29,7 +30,11 @@ class EvalDiffusionAgentReal:
 
         # shm_manager = SharedMemoryManager()
 
-        self.env = RobotEnv(robot_type="panda", action_space='cartesian_position',gripper_action_space="position")
+        self.env = RobotEnv(
+            robot_type="panda",
+            action_space="cartesian_position",
+            gripper_action_space="position",
+        )
         self.n_envs = 1
 
         self.n_cond_step = cfg.cond_steps
@@ -49,7 +54,6 @@ class EvalDiffusionAgentReal:
         self.render_dir = os.path.join(self.logdir, "render")
         self.result_path = os.path.join(self.logdir, "result.npz")
         os.makedirs(self.render_dir, exist_ok=True)
-
 
     def run(self):
         pass
