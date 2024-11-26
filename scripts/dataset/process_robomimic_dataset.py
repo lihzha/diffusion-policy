@@ -78,7 +78,6 @@ robomimic dataset normalizes action to [-1, 1], observation roughly? to [-1, 1].
 
 """
 
-
 import numpy as np
 from tqdm import tqdm
 import h5py
@@ -127,10 +126,10 @@ def make_dataset(load_path, save_dir, save_name_prefix, val_split, normalize):
 
         # Initialize variables for tracking trajectory statistics
         traj_lengths = []
-        obs_min = np.zeros((obs_dim))
-        obs_max = np.zeros((obs_dim))
-        action_min = np.zeros((action_dim))
-        action_max = np.zeros((action_dim))
+        obs_min = np.inf * np.ones((obs_dim))
+        obs_max = -np.inf * np.ones((obs_dim))
+        action_min = np.inf * np.ones((action_dim))
+        action_max = -np.inf * np.ones((action_dim))
 
         # Process each demo
         for ep in demos:
@@ -256,6 +255,16 @@ def make_dataset(load_path, save_dir, save_name_prefix, val_split, normalize):
         logging.info(
             f"Val - Trajectories: {len(out_val['traj_lengths'])}, Transitions: {np.sum(out_val['traj_lengths'])}"
         )
+        for obs_dim_ind in range(obs_dim):
+            obs = out_train["states"][:, obs_dim_ind]
+            logging.info(
+                f"Train - Obs dim {obs_dim_ind+1} mean {np.mean(obs)} std {np.std(obs)} min {np.min(obs)} max {np.max(obs)}"
+            )
+        for action_dim_ind in range(action_dim):
+            action = out_train["actions"][:, action_dim_ind]
+            logging.info(
+                f"Train - Action dim {action_dim_ind+1} mean {np.mean(action)} std {np.std(action)} min {np.min(action)} max {np.max(action)}"
+            )
 
 
 if __name__ == "__main__":

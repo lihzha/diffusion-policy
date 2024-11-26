@@ -32,24 +32,29 @@ log = logging.getLogger(__name__)
 sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode="w", buffering=1)
 
+
 def cleanup():
     if dist.is_initialized():
         dist.destroy_process_group()
         print("Process group destroyed.")
-        
+
+
 def signal_handler(sig, frame):
     print(f"Received signal: {sig}. Cleaning up...")
     cleanup()
     exit(0)
-    
+
+
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
+
 
 # Function to run in each process
 def _main(cfg: OmegaConf):
     num_gpus = torch.cuda.device_count()
     if num_gpus > 1:
         from torch.distributed import init_process_group, destroy_process_group
+
         def ddp_setup():
             # os.environ["MASTER_ADDR"] = os.environ["SLURM_NODELIST"].split(",")[0]
             # os.environ["MASTER_PORT"] = "29500"
@@ -57,15 +62,16 @@ def _main(cfg: OmegaConf):
             torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
             # torch.cuda.set_device(rank)
             init_process_group(backend="nccl")
+
         ddp_setup()
-        cfg['gpu_id'] = int(os.environ["LOCAL_RANK"])
+        cfg["gpu_id"] = int(os.environ["LOCAL_RANK"])
     else:
-        cfg['gpu_id'] = 0
-    
-    cfg['_target_'] = 'agent.val.val_diffusion_img_agent_real.ValImgDiffusionAgentReal'
-        
+        cfg["gpu_id"] = 0
+
+    cfg["_target_"] = "agent.val.val_diffusion_img_agent_real.ValImgDiffusionAgentReal"
+
     logging.info(cfg)
-    
+
     # Initialize and run the agent
     cls = hydra.utils.get_class(cfg._target_)
     agent = cls(cfg)
@@ -74,7 +80,7 @@ def _main(cfg: OmegaConf):
     if num_gpus > 1:
         destroy_process_group()
 
-    
+
 @hydra.main(
     config_path=os.path.join(
         os.getcwd(), "guided_dc/cfg/real/pick_and_place"
@@ -84,6 +90,7 @@ def _main(cfg: OmegaConf):
 def main(cfg: OmegaConf):
 
     _main(cfg)
+
 
 if __name__ == "__main__":
     main()

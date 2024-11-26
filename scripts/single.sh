@@ -33,4 +33,4 @@ echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
 # Run script with selected configuration
-HYDRA_FULL_ERROR=1 python guided_dc/scripts/run.py ${CONFIGS[0]}
+HYDRA_FULL_ERROR=1 python scripts/run.py ${CONFIGS[0]}

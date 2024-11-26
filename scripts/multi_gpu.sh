@@ -3,7 +3,7 @@
 #SBATCH --job-name=unet-robot    # Job name
 #SBATCH --output=logs/%A.out   # Output file
 #SBATCH --error=logs/%A.err    # Error file
-#SBATCH --time=72:00:00            # Maximum runtime
+#SBATCH --time=24:00:00            # Maximum runtime
 #SBATCH -N 1
 #SBATCH --gres=gpu:3            # Request 1 GPU
 #SBATCH --ntasks-per-node=1          # 1 task per node
@@ -45,4 +45,4 @@ export MASTER_PORT=$(find_free_port)
 
 
 # Run script with selected configuration using torchrun
-HYDRA_FULL_ERROR=1 torchrun --nnodes=1 --nproc_per_node=3 --rdzv_id=100 --rdzv_backend=c10d --standalone --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT guided_dc/scripts/run.py ${CONFIGS[0]}
+HYDRA_FULL_ERROR=1 torchrun --nnodes=1 --nproc_per_node=3 --rdzv_id=100 --rdzv_backend=c10d --standalone --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT scripts/run.py ${CONFIGS[0]}
