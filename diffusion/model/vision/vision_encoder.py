@@ -36,8 +36,11 @@ class VisionEncoder(nn.Module):
         super().__init__()
 
         # 1. Augmentation
-        self.aug = torch.nn.Sequential(*aug) if aug is not None else None
-        self.img_size = img_size.copy()
+        if aug is not None:
+            self.aug = torch.nn.Sequential(*aug)
+            img_size = self.aug(torch.randint(0, 256, (1, *img_size))).shape[-3:]
+        else:
+            self.img_size = img_size.copy()
 
         # 2. Load model
         self.model_name = model_name
