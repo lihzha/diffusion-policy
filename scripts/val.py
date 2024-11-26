@@ -85,7 +85,7 @@ def _main(cfg: OmegaConf):
     config_path=os.path.join(
         os.getcwd(), "guided_dc/cfg/real/pick_and_place"
     ),  # possibly overwritten by --config-path
-    config_name="diffusion_unet_vit.yaml",
+    config_name="diffusion_unet_img.yaml",
 )
 def main(cfg: OmegaConf):
 

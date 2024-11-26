@@ -3,7 +3,7 @@ defaults:
 hydra:
   run:
     dir: ${logdir}
-_target_: agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+_target_: diffusion.agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
 
 name: ${env}_pre_diffusion_unet_ta${horizon_steps}_td${denoising_steps}
 logdir: ${oc.env:GDC_LOG_DIR}/robomimic-pretrain/${name}/${now:%Y-%m-%d}_${now:%H-%M-%S}_${seed}
@@ -37,11 +37,16 @@ train:
   save_model_freq: 1000
 
 model:
-  _target_: model.diffusion.diffusion.DiffusionModel
+  _target_: diffusion.model.diffusion.diffusion.DiffusionModel
+  device: ${device}
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
   predict_epsilon: True
   denoised_clip_value: 1.0
   network:
-    _target_: model.diffusion.unet.Unet1D
+    _target_: diffusion.model.diffusion.unet.Unet1D
     diffusion_step_embed_dim: 16
     dim: 64
     dim_mults: [1, 2]
@@ -61,7 +66,8 @@ ema:
   decay: 0.995
 
 train_dataset:
-  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  _target_: diffusion.agent.dataset.sequence.StitchedSequenceDataset
+  use_img: True
   dataset_path: ${train_dataset_path}
   horizon_steps: ${horizon_steps}
   cond_steps: ${cond_steps}

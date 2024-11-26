@@ -142,7 +142,7 @@ class VisionEncoder(nn.Module):
 
     def get_repr_dim(self):
         x = {
-            f"{i}": torch.randn(1, self.img_cond_steps, *self.img_size)
+            f"{i}": torch.randint(0, 256, (1, self.img_cond_steps, *self.img_size))
             for i in range(self.num_views)
         }
         x = self.forward(x, aggregate=False)
