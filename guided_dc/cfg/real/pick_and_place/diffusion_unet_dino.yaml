@@ -12,10 +12,10 @@ name: ${model.network.backbone.model_name}_${model.network.backbone.feature_aggr
 logdir: ${oc.env:GDC_LOG_DIR}/real_pick_and_place/${job_id}_${model.network.backbone.model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
 train_dataset_path: ${oc.env:GDC_DATA_DIR}/traj_data/dataset_${dataset_name}.npz
 
-wandb:
-  entity: ${oc.env:GDC_WANDB_ENTITY}
-  project: realworld-${env}
-  run: ${job_id}_${name}
+# wandb:
+#   entity: ${oc.env:GDC_WANDB_ENTITY}
+#   project: realworld-${env}
+#   run: ${job_id}_${name}
 
 # Eval
 # base_policy_path: /home/lab/droid/ckpts/state_3350_resnet_aug_groupnorm_js.pt
@@ -145,7 +145,7 @@ model:
           num_crops: 1
           pos_enc: false 
         
-        # - _target_: model.vision.modules.ColorJitter
+        # - _target_: diffusion.model.vision.modules.ColorJitter
         #   brightness: 0.3
         #   contrast: 0.4
         #   saturation: 0.5

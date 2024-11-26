@@ -40,12 +40,19 @@ dependencies = [
     "omegaconf==2.3.0",
     "hydra-core==1.3.2",
     "moviepy==1.0.3",
-    # DPPO dependencies
+    "matplotlib",
     "timm",
+    "peft",
+    "wandb",
+    "einops",
+    "av==12.3.0",
+    "GPUtil",
+
 ]
 
 [tool.setuptools.packages.find]
-exclude = []
+where = ["."]
+exclude = ["data", "logs", "log", "wandb"]
 
 [tool.wheel]
 exclude = []
