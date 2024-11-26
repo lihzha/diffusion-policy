@@ -8,14 +8,13 @@ import wandb
 import numpy as np
 import torch
 log = logging.getLogger(__name__)
-from utils.timer import Timer
-from agent.pretrain.train_agent import PreTrainAgent, batch_to_device
-from utils.preprocess_utils import batch_apply
 
 import time
-
 import GPUtil
 
+from diffusion.agent.pretrain.train_agent import PreTrainAgent, batch_to_device
+from guided_dc.utils.timer import Timer
+from guided_dc.utils.preprocess_utils import batch_apply
 
 class TrainDiffusionAgent(PreTrainAgent):
 
@@ -34,6 +33,7 @@ class TrainDiffusionAgent(PreTrainAgent):
                 self.dataloader_train.sampler.set_epoch(epoch)
             # train
             loss_train_epoch = []
+            cnt_batch = 0
             for batch_train in self.dataloader_train:
                 
                 # st = time.time()
@@ -64,6 +64,11 @@ class TrainDiffusionAgent(PreTrainAgent):
 
                 self.optimizer.step()
                 self.optimizer.zero_grad(set_to_none=True)
+
+                # update ema
+                if cnt_batch % self.update_ema_freq == 0:
+                    self.step_ema()
+                cnt_batch += 1
             loss_train = np.mean(loss_train_epoch)
 
             del batch_train
@@ -90,10 +95,6 @@ class TrainDiffusionAgent(PreTrainAgent):
 
             # update lr
             self.lr_scheduler.step()
-
-            # update ema
-            if self.epoch % self.update_ema_freq == 0:
-                self.step_ema()
 
             # save model
             if (self.epoch % self.save_model_freq == 0 or self.epoch == self.n_epochs) and self.gpu_id == 0:

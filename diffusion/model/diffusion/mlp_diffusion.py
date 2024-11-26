@@ -6,12 +6,9 @@ MLP models for diffusion policies.
 import torch
 import torch.nn as nn
 import logging
-import einops
-from copy import deepcopy
 
-from model.common.mlp import MLP, ResidualMLP
-from model.diffusion.modules import SinusoidalPosEmb
-from model.common.modules import SpatialEmb, RandomShiftsAug
+from diffusion.model.common.mlp import MLP, ResidualMLP
+from diffusion.model.diffusion.modules import SinusoidalPosEmb
 
 log = logging.getLogger(__name__)
 
@@ -25,57 +22,19 @@ class VisionDiffusionMLP(nn.Module):
         action_dim,
         horizon_steps,
         cond_dim,
-        img_cond_steps=1,
         time_dim=16,
         mlp_dims=[256, 256],
         activation_type="Mish",
         out_activation_type="Identity",
         use_layernorm=False,
         residual_style=False,
-        spatial_emb=0,
-        visual_feature_dim=128,
-        dropout=0,
-        # num_img=1,
-        augment=False,
     ):
         super().__init__()
 
         # vision
         self.backbone = backbone
-        if augment:
-            self.aug = RandomShiftsAug(pad=4)
-        self.augment = augment
-        # self.num_img = num_img
-        self.img_cond_steps = img_cond_steps
-        if spatial_emb > 0:
-            assert spatial_emb > 1, "this is the dimension"
-            # if num_img > 1:
-            #     self.compress1 = SpatialEmb(
-            #         num_patch=self.backbone.num_patch,
-            #         patch_dim=self.backbone.patch_repr_dim,
-            #         prop_dim=cond_dim,
-            #         proj_dim=spatial_emb,
-            #         dropout=dropout,
-            #     )
-            #     self.compress2 = deepcopy(self.compress1)
-            # else:  # TODO: clean up
-            self.compress = SpatialEmb(
-                num_patch=self.backbone.num_patch,
-                patch_dim=self.backbone.patch_repr_dim,
-                prop_dim=cond_dim,
-                proj_dim=spatial_emb,
-                dropout=dropout,
-            )
-            # visual_feature_dim = spatial_emb * num_img
-            visual_feature_dim = spatial_emb
-        else:
-            self.compress = nn.Sequential(
-                nn.Linear(self.backbone.repr_dim, visual_feature_dim),
-                nn.LayerNorm(visual_feature_dim),
-                nn.Dropout(dropout),
-                nn.ReLU(),
-            )
-
+        visual_feature_dim = backbone.repr_dim
+        
         # diffusion
         input_dim = (
             time_dim + action_dim * horizon_steps + visual_feature_dim + cond_dim
@@ -129,12 +88,6 @@ class VisionDiffusionMLP(nn.Module):
 
         # Take recent images --- sometimes we want to use fewer img_cond_steps than cond_steps (e.g., 1 image but 3 prio)
         rgb = cond["rgb"].copy()
-        for k, v in rgb.items():
-            rgb[k] = v[:, -self.img_cond_steps :].clone()
-            rgb[k] = einops.rearrange(rgb[k], "b t c h w -> b (t c) h w")
-            rgb[k] = rgb[k].float()
-            if self.augment:
-                rgb[k] = self.aug(rgb[k])
 
         # rgb = cond["rgb"][:, -self.img_cond_steps :]
 
@@ -163,14 +116,7 @@ class VisionDiffusionMLP(nn.Module):
         # else:  # single image
         # if self.augment:
         #     rgb = self.aug(rgb)
-        feat = self.backbone(rgb) # [batch, num_patch, embed_dim]
-
-        # compress
-        if isinstance(self.compress, SpatialEmb):
-            feat = self.compress.forward(feat, state)
-        else:
-            feat = feat.flatten(1, -1)
-            feat = self.compress(feat)
+        feat = self.backbone(rgb, state) # [batch, num_patch, embed_dim]
         cond_encoded = torch.cat([feat, state], dim=-1)
 
         # append time and cond

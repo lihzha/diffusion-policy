@@ -11,7 +11,7 @@ import logging
 import pickle
 import random
 
-from guided_dc.utils.preprocess_utils import preprocess_img, Batch
+from guided_dc.utils.preprocess_utils import Batch
 
 log = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class StitchedSequenceDataset(torch.utils.data.Dataset):
                 images = self.images[(start - num_before_start) : end]
                 images = stack_pkg.stack(
                     [
-                        preprocess_img(images[max(num_before_start - t, 0)])
+                        images[max(num_before_start - t, 0)]
                         for t in reversed(range(self.img_cond_steps))
                     ]
                 )
@@ -159,7 +159,7 @@ class StitchedSequenceDataset(torch.utils.data.Dataset):
                     images[idx] = self.images[idx][(start - num_before_start) : end]
                     images[idx] = stack_pkg.stack(
                         [
-                            preprocess_img(images[idx][max(num_before_start - t, 0)])
+                            images[idx][max(num_before_start - t, 0)]
                             for t in reversed(range(self.img_cond_steps))
                         ]
                     )
@@ -198,4 +198,3 @@ class StitchedSequenceDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.indices)
-

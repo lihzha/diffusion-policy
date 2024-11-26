@@ -7,7 +7,7 @@ name = "guided-dc"
 version = "0.1.0"
 description = "Guided data collection."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 classifiers = [
     "Programming Language :: Python :: 3",
 ]

@@ -9,10 +9,12 @@ import torch
 import logging
 
 log = logging.getLogger(__name__)
-from utils.timer import Timer
-from agent.val.val_agent_real import ValAgentReal
 import cv2
-from utils.preprocess_utils import batch_apply
+
+from diffusion.agent.val.val_agent_real import ValAgentReal
+from guided_dc.utils.preprocess_utils import batch_apply
+from guided_dc.utils.timer import Timer
+
 
 class ValImgDiffusionAgentReal(ValAgentReal):
 

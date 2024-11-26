@@ -1,11 +1,13 @@
 """
-Additional implementation of the ViT image encoder from https://github.com/hengyuan-hu/ibrl/tree/main
+Additional implementation of the ViT image encoder from https://github.com/hengyuan-hu/ibrl/tree/main and https://github.com/real-stanford/diffusion_policy/tree/main
 
 """
 
 import torch
 import torch.nn as nn
-
+import torchvision.transforms.functional as ttf
+import guided_dc.utils.tensor_util as tu
+import torchvision
 
 class SpatialEmb(nn.Module):
     def __init__(self, num_patch, patch_dim, prop_dim, proj_dim, dropout):
@@ -68,11 +70,6 @@ class RandomShiftsAug:
             x, grid, padding_mode="zeros", align_corners=False
         )
 
-
-import torch
-import torch.nn as nn
-import torchvision.transforms.functional as ttf
-import guided_dc.utils.tensor_util as tu
 
 class CropRandomizer(nn.Module):
     """
@@ -361,46 +358,87 @@ def sample_random_image_crops(images, crop_height, crop_width, num_crops, pos_en
     return crops, crop_inds
 
 
+class ColorJitter(nn.Module):
+    def __init__(self, brightness=0.3, contrast=0.4, saturation=0.5, hue=0.1):
+        super().__init__()
+        self.color_jitter = torchvision.transforms.ColorJitter(
+            brightness=brightness, contrast=contrast, saturation=saturation, hue=hue
+        )
+
+    def forward(self, x):
+        if self.training:
+            return self.color_jitter(x)
+        else:
+            return x
+
+
+class Resize(nn.Module):
+    def __init__(self, size):
+        super().__init__()
+        assert len(size) == 3 and size[0] == 3
+        self.size = size
+        self.resize = torchvision.transforms.Resize(size[1:])
+
+    def forward(self, x):
+        if x.size()[-3:] == self.size:
+            return x
+        else:
+            return self.resize(x)
+    
+class Normalize(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, x):
+        assert x.max() > 5, x.max() 
+        x = x / 255.0 - 0.5
+        return x
+
 # test random shift
 if __name__ == "__main__":
-    from PIL import Image
-    import requests
-    import numpy as np
+    # from PIL import Image
+    # import requests
+    # import numpy as np
 
-    image_url = "https://rail.eecs.berkeley.edu/datasets/bridge_release/raw/bridge_data_v2/datacol2_toykitchen7/drawer_pnp/01/2023-04-19_09-18-15/raw/traj_group0/traj0/images0/im_30.jpg"
-    image = Image.open(requests.get(image_url, stream=True).raw)
-    image = image.resize((240, 320))
-    image.save("image.jpg")
+    # image_url = "https://rail.eecs.berkeley.edu/datasets/bridge_release/raw/bridge_data_v2/datacol2_toykitchen7/drawer_pnp/01/2023-04-19_09-18-15/raw/traj_group0/traj0/images0/im_30.jpg"
+    # image = Image.open(requests.get(image_url, stream=True).raw)
+    # image = image.resize((240, 320))
+    # image.save("image.jpg")
 
-    image = torch.tensor(np.array(image)).permute(2, 1, 0).unsqueeze(0).float()
-    print(image.shape)
+    # image = torch.tensor(np.array(image)).permute(2, 1, 0).unsqueeze(0).float()
+    # print(image.shape)
     
-    aug = CropRandomizer(input_shape=(3, 240, 320), crop_height_pct=0.7, crop_width_pct=0.7, num_crops=1, pos_enc=False)
+    # aug = CropRandomizer(input_shape=(3, 240, 320), crop_height_pct=0.7, crop_width_pct=0.7, num_crops=1, pos_enc=False)
     
-    # image =  torch.randn(2, 3, 240, 320)
+    # # image =  torch.randn(2, 3, 240, 320)
     
-    image_aug = aug(image)
+    # image_aug = aug(image)
     
-    ## Save the augmented image to disk
-    image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
-    image_aug = Image.fromarray(image_aug.astype(np.uint8))
-    image_aug.save("image_aug.jpg")
+    # ## Save the augmented image to disk
+    # image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
+    # image_aug = Image.fromarray(image_aug.astype(np.uint8))
+    # image_aug.save("image_aug.jpg")
     
-    image_aug = aug(image)
-    ## Save the augmented image to disk
-    image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
-    image_aug = Image.fromarray(image_aug.astype(np.uint8))
-    image_aug.save("image_aug2.jpg")
+    # image_aug = aug(image)
+    # ## Save the augmented image to disk
+    # image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
+    # image_aug = Image.fromarray(image_aug.astype(np.uint8))
+    # image_aug.save("image_aug2.jpg")
 
-    image_aug = aug(image)
-    ## Save the augmented image to disk
-    image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
-    image_aug = Image.fromarray(image_aug.astype(np.uint8))
-    image_aug.save("image_aug3.jpg")
+    # image_aug = aug(image)
+    # ## Save the augmented image to disk
+    # image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
+    # image_aug = Image.fromarray(image_aug.astype(np.uint8))
+    # image_aug.save("image_aug3.jpg")
     
-    aug.eval()
-    image_aug = aug(image)
-    image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
-    image_aug = Image.fromarray(image_aug.astype(np.uint8))
-    image_aug.save("image_aug4.jpg")
+    # aug.eval()
+    # image_aug = aug(image)
+    # image_aug = image_aug.squeeze().permute(2, 1, 0).numpy()
+    # image_aug = Image.fromarray(image_aug.astype(np.uint8))
+    # image_aug.save("image_aug4.jpg")
    
+    smb = SpatialEmb(num_patch=113, patch_dim=512, prop_dim=7, proj_dim=43, dropout=0.0)
+    feat = torch.randn(3, 113, 512)
+    state = torch.randn(3, 7)
+    out = smb(feat, state)
+    

@@ -10,7 +10,7 @@ import logging
 
 log = logging.getLogger(__name__)
 from utils.timer import Timer
-from agent.eval.eval_agent import EvalAgent
+from diffusion.agent.eval.eval_agent import EvalAgent
 
 
 class EvalImgDiffusionAgent(EvalAgent):

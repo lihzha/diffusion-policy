@@ -28,3 +28,6 @@ interactive.sh
 *.env
 *.npy
 result/
+ckpts/
+data/
+log/

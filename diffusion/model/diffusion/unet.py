@@ -13,16 +13,13 @@ import logging
 
 log = logging.getLogger(__name__)
 
-from model.diffusion.modules import (
+from diffusion.model.diffusion.modules import (
     SinusoidalPosEmb,
     Downsample1d,
     Upsample1d,
     Conv1dBlock,
 )
-from model.common.mlp import ResidualMLP
-from model.common.modules import SpatialEmb, RandomShiftsAug, CropRandomizer
-
-# import time as t
+from diffusion.model.common.mlp import ResidualMLP
 
 
 class ResidualBlock1D(nn.Module):
@@ -334,11 +331,7 @@ class VisionUnet1D(nn.Module):
         self,
         backbone,
         action_dim,
-        aug=None,
         cond_dim=None,
-        spatial_emb=0,
-        visual_feature_dim=None,
-        dropout=0,
         diffusion_step_embed_dim=32,
         dim=32,
         dim_mults=(1, 2, 4, 8),
@@ -349,45 +342,12 @@ class VisionUnet1D(nn.Module):
         activation_type="Mish",
         cond_predict_scale=False,
         groupnorm_eps=1e-5,
-        augment=False,
-        use_compress=False
     ):
         super().__init__()
 
         # vision
         self.backbone = backbone
-
-        if augment:
-            # self.aug = RandomShiftsAug(pad=4)
-            assert aug is not None, "aug should not be None"
-            self.aug = aug
-        else:
-            assert aug is None, "aug should be None"
-            
-        self.augment = augment
-        if spatial_emb > 0:
-            assert spatial_emb > 1, "this is the dimension"
-
-            self.compress = SpatialEmb(
-                num_patch=self.backbone.num_patch,
-                patch_dim=self.backbone.patch_repr_dim,
-                prop_dim=cond_dim,
-                proj_dim=spatial_emb,
-                dropout=dropout,
-            )
-            assert visual_feature_dim is None, "visual_feature_dim should be None"
-            visual_feature_dim = spatial_emb
-        else:
-            if use_compress:
-                self.compress = nn.Sequential(
-                    nn.Linear(self.backbone.repr_dim, visual_feature_dim),
-                    nn.LayerNorm(visual_feature_dim),
-                    nn.Dropout(dropout),
-                    nn.ReLU(),
-                )
-            else:
-                self.compress = nn.Identity()
-                visual_feature_dim = self.backbone.repr_dim
+        visual_feature_dim = self.backbone.repr_dim
 
         dims = [action_dim, *map(lambda m: dim * m, dim_mults)]
         in_out = list(zip(dims[:-1], dims[1:]))
@@ -400,7 +360,7 @@ class VisionUnet1D(nn.Module):
             nn.Mish(),
             nn.Linear(dsed * 4, dsed),
         )
-        
+
         if cond_mlp_dims is not None:
             self.cond_mlp = ResidualMLP(
                 dim_list=[cond_dim] + cond_mlp_dims,
@@ -545,30 +505,12 @@ class VisionUnet1D(nn.Module):
 
         # visual encoder
         rgb = cond["rgb"].copy()
-        for k in rgb.keys():
-            rgb[k] = einops.rearrange(rgb[k], "b t c h w -> (b t) c h w")
-            if self.augment:
-                rgb[k] = self.aug(rgb[k])
+        vis_feat = self.backbone(rgb, state)  # [batch, embed_dim]
+        
+        # global features
+        cond_encoded = torch.cat([vis_feat, state], dim=-1)
 
-        # start_vis_time = t.time()
-
-        feat = self.backbone(rgb)  # [batch, num_patch, embed_dim]
-
-        # end_vis_time = t.time()
-        # print(f"Vision time: {end_vis_time - start_vis_time}")
-
-        # compress
-        if isinstance(self.compress, SpatialEmb):
-            feat = self.compress.forward(feat, state)  # [batch, spatial_embed]
-        else:
-            feat = feat.flatten(1, -1)
-            feat = self.compress(feat)
-        cond_encoded = torch.cat([feat, state], dim=-1)
-
-        # end_compress_time = t.time()
-        # print(f"Compress time: {end_compress_time - end_vis_time}")
-
-        # 1. time
+        # time feature
         if not torch.is_tensor(time):
             time = torch.tensor([time], dtype=torch.long, device=x.device)
         elif torch.is_tensor(time) and len(time.shape) == 0:
@@ -577,9 +519,6 @@ class VisionUnet1D(nn.Module):
         time = time.expand(x.shape[0])
         global_feature = self.time_mlp(time)
         global_feature = torch.cat([global_feature, cond_encoded], axis=-1)
-
-        # end_time_mlp_time = t.time()
-        # print(f"Time MLP time: {end_time_mlp_time - end_compress_time}")
 
         # encode local features
         h_local = list()
@@ -604,9 +543,6 @@ class VisionUnet1D(nn.Module):
             x = upsample(x)
 
         x = self.final_conv(x)
-
-        # end_final_conv_time = t.time()
-        # print(f"Final conv time: {end_final_conv_time - end_time_mlp_time}")
-
+        
         x = einops.rearrange(x, "b t h -> b h t")
         return x

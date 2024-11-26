@@ -14,7 +14,7 @@ import wandb
 from copy import deepcopy
 
 log = logging.getLogger(__name__)
-from utils.scheduler import CosineAnnealingWarmupRestarts
+from guided_dc.utils.scheduler import CosineAnnealingWarmupRestarts
 import GPUtil
 
 
@@ -74,8 +74,8 @@ class PreTrainAgent:
         self.cfg = cfg
 
         # Wandb
-        self.use_wandb = cfg.wandb is not None
-        if cfg.wandb is not None and self.gpu_id == 0:
+        self.use_wandb = cfg.get("wandb", None)
+        if self.use_wandb and self.gpu_id == 0:
             wandb.init(
                 entity=cfg.wandb.entity,
                 project=cfg.wandb.project,
