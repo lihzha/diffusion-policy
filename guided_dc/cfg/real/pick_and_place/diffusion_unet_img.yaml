@@ -7,39 +7,39 @@ _target_: diffusion.agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
 job_id: 0
 gpu_id: null
 
-dataset_name: jsg_jsg_2cam_96
-name: ${model.network.backbone.model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
-logdir: ${oc.env:GDC_LOG_DIR}/real_pick_and_place/${job_id}_${model.network.backbone.model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
+dataset_name: eefg_eefg_2cam_96
+vis_model_name: vit_base_patch14_dinov2.lvd142m  # resnet18, custom_vit, vit_base_patch14_dinov2.lvd142m
+# vis_model_name: resnet18
+# vis_model_name: custom_vit
+
+name: ${vis_model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
+logdir: ${oc.env:GDC_LOG_DIR}/real_pick_and_place/${job_id}_${vis_model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
 train_dataset_path: ${oc.env:GDC_DATA_DIR}/traj_data/dataset_${dataset_name}.npz
+normalization_stats_path: ${oc.env:GDC_DATA_DIR}/traj_data/norm_${dataset_name}.npz
 
 # wandb:
 #   entity: ${oc.env:GDC_WANDB_ENTITY}
 #   project: realworld-${env}
 #   run: ${job_id}_${name}
 
-# Eval
-# base_policy_path: /home/lab/droid/ckpts/state_3350_resnet_aug_groupnorm_js.pt
-# normalization_stats_path: /home/lab/droid/traj_data/norm_no_vel.npz
-base_policy_path: null
-normalization_stats_path: null
-
 seed: 42
 device: cuda
 env: pick_and_place
-obs_dim: 8  # 7+7+1  6+1
-action_dim: 8
+obs_dim: 7  # 7+7+1  6+1
+action_dim: 7
 denoising_steps: 100
 horizon_steps: 16
 cond_steps: 2
-img_cond_steps: 2
+img_cond_steps: 1
 debug: False
 
 # Eval
 act_steps: 8
 use_ddim: true
 ddim_steps: 10
-ordered_obs_keys: ['joint_positions', 'gripper_position']
 n_steps: 300
+ordered_obs_keys: null  #['joint_positions', 'gripper_position']
+action_space: null      # "cartesian_position", "joint_position"
 
 shape_meta:
   obs:
@@ -58,9 +58,9 @@ train:
     first_cycle_steps: ${train.n_epochs}
     warmup_steps: 100
     min_lr: 1e-5
-  epoch_start_ema: 20
-  update_ema_freq: 5
-  save_model_freq: 50
+  epoch_start_ema: 5
+  update_ema_freq: 10
+  save_model_freq: 100
   # dataloader
   store_gpu: False
   num_workers: 1
@@ -69,7 +69,7 @@ train:
   # validation
   train_split: 0.85
   val_batch_size: ${train.batch_size}
-  val_freq: 50
+  val_freq: ${train.save_model_freq}
 
 model:
   _target_: diffusion.model.diffusion.diffusion.DiffusionModel
@@ -84,7 +84,7 @@ model:
   # Eval
   use_ddim: ${use_ddim}
   ddim_steps: ${ddim_steps}
-  network_path: ${base_policy_path}
+  network_path: null
   
   network:
     _target_: diffusion.model.diffusion.unet.VisionUnet1D
@@ -98,15 +98,9 @@ model:
     cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
     action_dim: ${action_dim}
     
-    use_compress: False
-    dropout: 0
-    spatial_emb: 0
-    augment: false
     backbone:
       _target_: diffusion.model.vision.vision_encoder.VisionEncoder
-      model_name: vit_base_patch14_dinov2.lvd142m  # resnet18, custom_vit, vit_base_patch14_dinov2.lvd142m
-      # model_name: resnet18
-      # model_name: custom_vit
+      model_name: ${vis_model_name}
       num_views: 2
       img_cond_steps: ${img_cond_steps}
       share_rgb_model: False
@@ -118,20 +112,31 @@ model:
       use_lora: false
       lora_rank: 8
       drop_path_rate: 0.0
-      img_size: ${shape_meta.obs.rgb.shape[1]}
-      share_rgb_model: False
-      num_views: 2
-      img_cond_steps: ${img_cond_steps}
 
-      # feature_aggregation: # 'none', 'mean', 'concat', 'spatial_emb', 'compress'
-      #   type: 'spatial_emb'
-      #   spatial_emb: 128
-      #   cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
-      #   dropout: 0
+      # custom vit only
+      patch_size: 8
+      depth: 2
+      embed_dim: 512
+      num_heads: 8
+      embed_style: embed2 
+      embed_norm: 0
+      share_embed_head: False
+      use_large_patch: True
 
-      #   type: 'compress'
-      #   visual_feature_dim: 128
-      #   dropout: 0
+      feature_aggregation: # 'mean', 'concat', 'spatial_emb', 'compress', 'cls', 'avgpool', 'max'
+        # type: 'spatial_emb'
+        # spatial_emb: 128
+        # cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+        # dropout: 0
+
+        # type: 'compress'
+        # visual_feature_dim: 128
+        # dropout: 0
+
+        type: 'cls'
+        # type: 'mean'
+        # type: 'concat'
+        # type: 'avgpool'
         
 
       aug:

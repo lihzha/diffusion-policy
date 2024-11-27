@@ -38,9 +38,10 @@ class VisionEncoder(nn.Module):
         # 1. Augmentation
         if aug is not None:
             self.aug = torch.nn.Sequential(*aug)
+            self.raw_img_size = img_size.copy()
             img_size = self.aug(torch.randint(0, 256, (1, *img_size))).shape[-3:]
         else:
-            self.img_size = img_size.copy()
+            self.raw_img_size = img_size.copy()
 
         # 2. Load model
         self.model_name = model_name
@@ -144,7 +145,7 @@ class VisionEncoder(nn.Module):
 
     def get_repr_dim(self):
         x = {
-            f"{i}": torch.randint(0, 256, (1, self.img_cond_steps, *self.img_size))
+            f"{i}": torch.randint(0, 256, (1, self.img_cond_steps, *self.raw_img_size))
             for i in range(self.num_views)
         }
         x = self.forward(x, aggregate=False)
@@ -174,7 +175,7 @@ class VisionEncoder(nn.Module):
 
     def forward(self, rgb: dict, state=None, aggregate=True):
         for k in rgb.keys():
-            rgb[k] = einops.rearrange(rgb[k], "b t c h w -> (b t) c h w")
+            rgb[k] = einops.rearrange(rgb[k], "b cs c h w -> (b cs) c h w")
             if self.aug:
                 rgb[k] = self.aug(rgb[k])
         feat = self.model.forward(
@@ -191,7 +192,7 @@ class VisionEncoder(nn.Module):
                 x = self.nn_compress(x)
                 x = einops.rearrange(
                     x,
-                    "(b cs v) d-> b (cs v d)",
+                    "(v b cs) d-> b (cs v d)",
                     cs=self.img_cond_steps,
                     v=self.num_views,
                 )
@@ -204,7 +205,7 @@ class VisionEncoder(nn.Module):
             )  # (batch*img_cond_steps*num_views, h*w, emb_dim)
             x = einops.rearrange(
                 x,
-                "(b cs v) hw d-> b hw (cs v d)",
+                "(v b cs) hw d-> b hw (cs v d)",
                 cs=self.img_cond_steps,
                 v=self.num_views,
             )

@@ -1,0 +1,164 @@
+defaults:
+  - _self_
+hydra:
+  run:
+    dir: ${logdir}
+_target_: diffusion.agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+job_id: 0
+gpu_id: null
+
+dataset_name: eefg_eefg_2cam_96
+vis_model_name: vit_base_patch14_dinov2.lvd142m  # resnet18, custom_vit, vit_base_patch14_dinov2.lvd142m
+# vis_model_name: resnet18
+# vis_model_name: custom_vit
+
+name: $mlp_{vis_model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
+logdir: ${oc.env:GDC_LOG_DIR}/real_pick_and_place/${job_id}_mlp_${vis_model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
+train_dataset_path: ${oc.env:GDC_DATA_DIR}/traj_data/dataset_${dataset_name}.npz
+normalization_stats_path: ${oc.env:GDC_DATA_DIR}/traj_data/norm_${dataset_name}.npz
+
+seed: 42
+device: cuda
+env: pick_and_place
+obs_dim: 7  # 7+7+1  6+1
+action_dim: 7
+denoising_steps: 100
+horizon_steps: 16
+cond_steps: 2
+img_cond_steps: 2
+debug: False
+
+# Eval
+act_steps: 8
+use_ddim: true
+ddim_steps: 10
+n_steps: 300
+ordered_obs_keys: null  #['joint_positions', 'gripper_position']
+action_space: null      # "cartesian_position", "joint_position"
+
+shape_meta:
+  obs:
+    rgb:
+      shape: [3, 96, 96]  # not counting img_cond_steps
+    state:
+      shape: ${[obs_dim]}
+  action: 
+    shape: ${[action_dim]}
+
+train:
+  n_epochs: 8000
+  learning_rate: 1e-4
+  weight_decay: 1e-6
+  lr_scheduler:
+    first_cycle_steps: ${train.n_epochs}
+    warmup_steps: 100
+    min_lr: 1e-5
+  epoch_start_ema: 5
+  update_ema_freq: 10
+  save_model_freq: 100
+  # dataloader
+  store_gpu: False
+  num_workers: 1
+  persistent_workers: True
+  batch_size: 128
+  # validation
+  train_split: 0.85
+  val_batch_size: ${train.batch_size}
+  val_freq: ${train.save_model_freq}
+
+model:
+  _target_: diffusion.model.diffusion.diffusion.DiffusionModel
+  device: ${device}
+  horizon_steps: ${horizon_steps}
+  obs_dim: ${obs_dim}
+  action_dim: ${action_dim}
+  denoising_steps: ${denoising_steps}
+  predict_epsilon: True
+  denoised_clip_value: 1.0
+
+  # Eval
+  use_ddim: ${use_ddim}
+  ddim_steps: ${ddim_steps}
+  network_path: null
+  
+  network:
+    _target_: diffusion.model.diffusion.mlp_diffusion.VisionDiffusionMLP
+    time_dim: 32
+    mlp_dims: [768, 768, 768]
+    residual_style: True
+    cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+    horizon_steps: ${horizon_steps}
+    action_dim: ${action_dim}
+    backbone:
+      _target_: diffusion.model.vision.vision_encoder.VisionEncoder
+      model_name: ${vis_model_name}
+      num_views: 2
+      img_cond_steps: ${img_cond_steps}
+      share_rgb_model: False
+      img_size: ${shape_meta.obs.rgb.shape}
+
+      # timm only
+      pretrained: false
+      frozen: false
+      use_lora: false
+      lora_rank: 8
+      drop_path_rate: 0.0
+
+      # custom vit only
+      patch_size: 8
+      depth: 2
+      embed_dim: 512
+      num_heads: 4
+      embed_style: embed2 
+      embed_norm: 0
+      share_embed_head: False
+      use_large_patch: True
+
+      feature_aggregation: # 'mean', 'concat', 'spatial_emb', 'compress', 'cls', 'avgpool', 'max'
+        # type: 'spatial_emb'
+        # spatial_emb: 128
+        # cond_dim: ${eval:'${obs_dim} * ${cond_steps}'}
+        # dropout: 0
+
+        # type: 'compress'
+        # visual_feature_dim: 128
+        # dropout: 0
+
+        type: 'cls'
+        # type: 'mean'
+        # type: 'concat'
+        # type: 'avgpool'
+
+      aug:
+        - _target_: diffusion.model.vision.modules.Resize
+          size: ${shape_meta.obs.rgb.shape}
+
+        - _target_: diffusion.model.vision.modules.CropRandomizer
+          input_shape: ${shape_meta.obs.rgb.shape}
+          crop_height_pct: 0.92   # for vit, should ensure the crop size is multiple of patch size
+          crop_width_pct: 0.92
+          num_crops: 1
+          pos_enc: false 
+        
+        # - _target_: model.vision.modules.ColorJitter
+        #   brightness: 0.3
+        #   contrast: 0.4
+        #   saturation: 0.5
+        #   hue: 0.08
+        
+        - _target_: diffusion.model.vision.modules.Normalize
+
+ema:
+  decay: 0.995
+
+train_dataset:
+  _target_: agent.dataset.sequence.StitchedSequenceDataset
+  use_img: True
+  dataset_path: ${train_dataset_path}
+  horizon_steps: ${horizon_steps}
+  max_n_episodes: 100
+  cond_steps: ${cond_steps}
+  img_cond_steps: ${img_cond_steps}
+  device: ${device}
+  use_delta_actions: false
+  store_gpu: ${train.store_gpu}

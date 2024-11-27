@@ -154,15 +154,15 @@ class TimmEncoder(nn.Module):
             outputs.append(y)
         return torch.cat(
             outputs, dim=0
-        )  # vit: bs*img_cond_steps*num_views, patch_nums, embed_dim;
-        # resnet: bs*img_cond_steps*num_views, embed_dim, 7, 7
+        )  # vit: num_views*bs*img_cond_steps, patch_nums, embed_dim;
+        # resnet: num_views*bs*img_cond_steps, embed_dim, 7, 7
 
     def forward_batch(self, x: dict):
         # x is a dict with keys as view names and values as images. Concatenate the images along the batch dimension and reshape to (batch, patch_nums, embed_dim) after passing through the embedding layer.
-        x = torch.cat(list(x.values()), dim=0)  # bs*img_cond_steps*num_views, c, h, w
+        x = torch.cat(list(x.values()), dim=0)  # num_views*bs*img_cond_steps, c, h, w
         y = self.model(x)
-        return y  # vit: bs*img_cond_steps*num_views, patch_nums, embed_dim;
-        # resnet: bs*img_cond_steps*num_views, embed_dim, 7, 7
+        return y  # vit: num_views*bs*img_cond_steps, patch_nums, embed_dim;
+        # resnet: num_views*bs*img_cond_steps, embed_dim, 7, 7
 
 
 class DINOv2Encoder(TimmEncoder):

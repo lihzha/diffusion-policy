@@ -99,13 +99,10 @@ class PreTrainAgent:
             from torch.nn.parallel import DistributedDataParallel as DDP
 
             self.model = self.model.to(self.gpu_id)
-            print("Initializing model on gpu")
             self.model = DDP(self.model, device_ids=[self.gpu_id])
-            print("DDP initialized on gpu")
             self.device = torch.device(f"cuda:{self.gpu_id}")
             self.ema = EMA(cfg.ema)
             self.ema_model = deepcopy(self.model.module)
-            print("Ema model initialized")
             # dist.barrier()
         else:
             self.model = self.model.to(cfg.device)
@@ -114,10 +111,9 @@ class PreTrainAgent:
             self.ema_model = deepcopy(self.model)
 
         print(self.ema_model.device)
-        print("Model loaded, using gpu memory:")
         if torch.cuda.is_available():
             allocated_memory = torch.cuda.memory_allocated()
-            print(f"Allocated GPU memory after loading model: {allocated_memory} bytes")
+            print(f"Allocated GPU memory after loading model: {allocated_memory/1024/1024/1024} GB")
         GPUtil.showUtilization(all=True)
 
         # Training params
@@ -138,14 +134,14 @@ class PreTrainAgent:
 
         # Build dataset
         self.dataset_train = hydra.utils.instantiate(cfg.train_dataset)
-        print("Dataset loaded, using gpu memory:")
-        GPUtil.showUtilization(all=True, useOldCode=False)
+        
 
         if torch.cuda.is_available():
             allocated_memory = torch.cuda.memory_allocated()
             print(
-                f"Allocated GPU memory after loading dataset: {allocated_memory} bytes"
+                f"Allocated GPU memory after loading dataset: {allocated_memory/1024/1024/1024} GB"
             )
+        GPUtil.showUtilization(all=True, useOldCode=False)
 
         if cfg.train.store_gpu:
             assert self.dataset_train.device != "cpu", self.dataset_train.device
