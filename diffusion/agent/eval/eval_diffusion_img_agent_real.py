@@ -106,8 +106,8 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
     def process_multistep_img(self, obs, prev_obs=None):
         # camera_idx = ['0', '2', '3']
         camera_indices = ["0", "3"]
-        if prev_obs is not None:  # TODO: fixup
-            assert self.n_cond_step == 2
+        if self.n_img_cond_step == 2:  # TODO: better logic
+            assert prev_obs
             images = {}
             for idx in camera_indices:
                 resized_images_1 = obs["image"][idx].transpose(2, 0, 1)
@@ -123,7 +123,6 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
                 images[idx] = torch.from_numpy(images[idx]).to(self.device).float()
                 assert images[idx].shape == (1, 2, 3, 96, 96), images[idx].shape
         else:
-            assert self.n_cond_step == 1
             images = {}
             for idx in camera_indices:
                 resized_images = obs["image"][idx].transpose(2, 0, 1)

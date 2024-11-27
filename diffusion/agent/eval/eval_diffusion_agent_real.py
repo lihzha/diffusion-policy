@@ -32,12 +32,13 @@ class EvalDiffusionAgentReal:
 
         self.env = RobotEnv(
             robot_type="panda",
-            action_space="cartesian_position",
+            action_space=cfg.action_space,
             gripper_action_space="position",
         )
         self.n_envs = 1
 
         self.n_cond_step = cfg.cond_steps
+        self.n_img_cond_step = cfg.img_cond_steps
         self.obs_dim = cfg.obs_dim
         self.action_dim = cfg.action_dim
         self.act_steps = cfg.act_steps

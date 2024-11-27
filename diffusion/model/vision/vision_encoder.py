@@ -245,11 +245,7 @@ class VisionEncoder(nn.Module):
             x = self.nn_compress(x)
         elif self.feature_aggregation == "cls":
             # Get the cls token for each view, given that views and img_cond_steps and patches are concatenated
-            cls_token_idx_list = [
-                self.num_patch * i for i in range(self.num_views * self.img_cond_steps)
-            ]
-            # TODO: for eval ckpts from 1031167 to 1031238 only
-            cls_token_idx_list = [0]
+            cls_token_idx_list = [self.num_patch//self.num_views//self.img_cond_steps * i  for i in range(self.num_views * self.img_cond_steps)]
             x = x[:, cls_token_idx_list, :]
             x = x.flatten(1)
         elif self.feature_aggregation == "mean":

@@ -30,6 +30,8 @@ sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode="w", buffering=1)
 
 
+CKPT_PATH = "/home/lab/guided-data-collection/ckpts"
+
 def main():
 
     import argparse
@@ -40,12 +42,10 @@ def main():
     parser.add_argument("--ckpt", "-c", type=int, help="ckpt id, e.g., 0")
     args = parser.parse_args()
 
-    ckpt_path = "/home/lab/guided-data-collection/ckpts"
-
     # Get the config folder under the ckpt_path that starts with the job id, e.g., f'/home/lab/droid/ckpts/{job_id}_vit'
     job_id = args.job
-    job_folder = [f for f in os.listdir(ckpt_path) if f.startswith(job_id)][0]
-    job_folder = os.path.join(ckpt_path, job_folder)
+    job_folder = [f for f in os.listdir(CKPT_PATH) if f.startswith(job_id)][0]
+    job_folder = os.path.join(CKPT_PATH, job_folder)
     cfg_path = os.path.join(job_folder, "config.yaml")
     cfg = OmegaConf.load(cfg_path)
     ckpt_path = os.path.join(job_folder, f"state_{args.ckpt}.pt")
