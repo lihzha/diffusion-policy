@@ -50,11 +50,10 @@ class EvalDiffusionAgentReal:
         # Eval params
         self.n_steps = cfg.n_steps
 
-        # Logging, rendering
+        # Logging
         self.logdir = cfg.logdir
-        self.render_dir = os.path.join(self.logdir, "render")
         self.result_path = os.path.join(self.logdir, "result.npz")
-        os.makedirs(self.render_dir, exist_ok=True)
+        os.makedirs(self.logdir, exist_ok=True)
 
     def run(self):
         pass

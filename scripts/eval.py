@@ -5,10 +5,9 @@ Launcher for all experiments. Download pre-training data, normalization statisti
 
 import os
 import sys
-
-# import pretty_errors
+import argparse
+import datetime
 import logging
-
 import math
 import hydra
 from omegaconf import OmegaConf
@@ -34,8 +33,6 @@ CKPT_PATH = "/home/lab/guided-data-collection/ckpts"
 
 def main():
 
-    import argparse
-    import os
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--job", "-j", type=str, help="Job id, e.g., '100001'")
@@ -50,6 +47,9 @@ def main():
     cfg = OmegaConf.load(cfg_path)
     ckpt_path = os.path.join(job_folder, f"state_{args.ckpt}.pt")
 
+    # add datetime to logdir
+    cfg.logdir = os.path.join(cfg.logdir, f"{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}")
+
     # Initialize and run the agent
     cfg.gpu_id = 0
     cfg._target_ = (
@@ -57,13 +57,13 @@ def main():
     )
     cfg.model.network_path = ckpt_path
 
+    # Set up control and proprio
     if cfg.dataset_name.startswith("eefg"):
         cfg.ordered_obs_keys = ["cartesian_position", "gripper_position"]
     elif cfg.dataset_name.startswith("jsg"):
         cfg.ordered_obs_keys = ["joint_positions", "gripper_position"]
     else:
         raise NotImplementedError
-
     if "_eefg" in cfg.dataset_name:
         cfg.action_space = "cartesian_position"
     elif "_jsg" in cfg.dataset_name:

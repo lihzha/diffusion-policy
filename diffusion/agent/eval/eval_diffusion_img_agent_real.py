@@ -269,7 +269,11 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
         #     for image_queue in image_queues.values():
         #         image_queue.put(None)
 
-        np.save(f"cond_states_{step}.npy", np.array(cond_states))
-        np.save(f"images_{step}.npy", np.array(images))
-        np.save(f"actions_{step}.npy", np.array(actions))
-        np.save(f"robot_states_{step}.npy", np.array(robot_states))
+        # Save data
+        np.savez_compressed(
+            self.result_path, 
+            actions=np.array(actions),
+            robot_states=np.array(robot_states),
+            cond_states=np.array(cond_states),
+            images=np.array(images),
+        )
