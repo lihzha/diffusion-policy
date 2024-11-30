@@ -14,8 +14,8 @@ vis_model_name: vit_base_patch14_dinov2.lvd142m  # resnet18, custom_vit, vit_bas
 
 name: $mlp_{vis_model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
 logdir: ${oc.env:GDC_LOG_DIR}/real_pick_and_place/${job_id}_mlp_${vis_model_name}_${model.network.backbone.feature_aggregation.type}_${img_cond_steps}_${dataset_name}
-train_dataset_path: ${oc.env:GDC_DATA_DIR}/traj_data/dataset_${dataset_name}.npz
-normalization_stats_path: ${oc.env:GDC_DATA_DIR}/traj_data/norm_${dataset_name}.npz
+train_dataset_path: ${oc.env:GDC_DATA_DIR}/dataset_${dataset_name}.npz
+normalization_stats_path: ${oc.env:GDC_DATA_DIR/norm_${dataset_name}.npz
 
 seed: 42
 device: cuda
