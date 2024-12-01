@@ -12,10 +12,9 @@ import logging
 import math
 import hydra
 from omegaconf import OmegaConf
+import numpy as np
+import matplotlib.pyplot as plt
 
-import torch
-import signal
-import torch.distributed as dist
 
 # allows arbitrary python code execution in configs using the ${eval:''} resolver
 OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -33,64 +32,57 @@ sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode="w", buffering=1)
 
 
-def cleanup():
-    if dist.is_initialized():
-        dist.destroy_process_group()
-        print("Process group destroyed.")
+CKPT_PATH = "/home/lab/guided-data-collection/ckpts"
 
+def main():
 
-def signal_handler(sig, frame):
-    print(f"Received signal: {sig}. Cleaning up...")
-    cleanup()
-    exit(0)
+    import argparse
+    import os
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--job", "-j", type=str, help="Job id, e.g., '100001'")
+    parser.add_argument("--ckpt", "-c", type=int, help="ckpt id, e.g., 0")
+    parser.add_argument("--num_steps", "-s", type=int, help="Number of steps to run the agent", default=100)
+    args = parser.parse_args()
 
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-
-# Function to run in each process
-def _main(cfg: OmegaConf):
-    num_gpus = torch.cuda.device_count()
-    if num_gpus > 1:
-        from torch.distributed import init_process_group, destroy_process_group
-
-        def ddp_setup():
-            # os.environ["MASTER_ADDR"] = os.environ["SLURM_NODELIST"].split(",")[0]
-            # os.environ["MASTER_PORT"] = "29500"
-            # os.environ["NCCL_DEBUG"] = "INFO"
-            torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
-            # torch.cuda.set_device(rank)
-            init_process_group(backend="nccl")
-
-        ddp_setup()
-        cfg["gpu_id"] = int(os.environ["LOCAL_RANK"])
-    else:
-        cfg["gpu_id"] = 0
-
-    cfg["_target_"] = "agent.val.val_diffusion_img_agent_real.ValImgDiffusionAgentReal"
-
-    logging.info(cfg)
+    # Get the config folder under the ckpt_path that starts with the job id, e.g., f'/home/lab/droid/ckpts/{job_id}_vit'
+    job_id = args.job
+    job_folder = [f for f in os.listdir(CKPT_PATH) if f.startswith(job_id)][0]
+    job_folder = os.path.join(CKPT_PATH, job_folder)
+    cfg_path = os.path.join(job_folder, "config.yaml")
+    cfg = OmegaConf.load(cfg_path)
+    ckpt_path = os.path.join(job_folder, f"state_{args.ckpt}.pt")
 
     # Initialize and run the agent
+    cfg.gpu_id = 0
+    cfg._target_ = (
+        "diffusion.agent.val.val_diffusion_img_agent_real.ValImgDiffusionAgentReal"
+    )
+    cfg.model.network_path = ckpt_path
+
     cls = hydra.utils.get_class(cfg._target_)
     agent = cls(cfg)
-    agent.run()
-
-    if num_gpus > 1:
-        destroy_process_group()
-
-
-@hydra.main(
-    config_path=os.path.join(
-        os.getcwd(), "guided_dc/cfg/real/pick_and_place"
-    ),  # possibly overwritten by --config-path
-    config_name="diffusion_unet_img.yaml",
-)
-def main(cfg: OmegaConf):
-
-    _main(cfg)
-
-
+    agent.run(args.num_steps)
+    
+    # Visualize the results
+    result_folder = agent.result_path
+    loss = np.load(os.path.join(result_folder, f"loss_{args.num_steps}.npy"))
+    predicted_action_unnorm = np.load(os.path.join(result_folder, f"predicted_action_unnorm_{args.num_steps}.npy"))
+    true_action_unnorm = np.load(os.path.join(result_folder, f"true_action_unnorm_{args.num_steps}.npy"))
+    plt.hist(loss, bins=50, color='skyblue', edgecolor='black', alpha=0.7)
+    plt.savefig(os.path.join(result_folder, f"loss_{args.num_steps}.png"))
+    
+    assert len(predicted_action_unnorm.shape) == 4 and predicted_action_unnorm.shape == true_action_unnorm.shape
+    fig, axs = plt.subplots(4, 2, figsize=(10, 15))
+    for i in range(predicted_action_unnorm.shape[-1]):
+        error_i = np.abs(predicted_action_unnorm[..., i] - true_action_unnorm[..., i]).mean(axis=(1, 2))
+        # axs[i//2, i%2].plot(error_i)
+        axs[i//2, i%2].hist(error_i, bins=50, color='skyblue', edgecolor='black', alpha=0.7)
+        axs[i//2, i%2].set_title(f"Action dim {i}")
+        # axs[i//2, i%2].set_xlabel("Step")
+        axs[i//2, i%2].set_ylabel("Absolute Error (m)")
+    plt.tight_layout()
+    plt.savefig(os.path.join(result_folder, f"action_error_{args.num_steps}.png"))
+  
 if __name__ == "__main__":
     main()

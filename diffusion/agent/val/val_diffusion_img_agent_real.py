@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 from diffusion.agent.val.val_agent_real import ValAgentReal
 from guided_dc.utils.preprocess_utils import batch_apply
-
+import os
 
 class ValImgDiffusionAgentReal(ValAgentReal):
 
@@ -45,7 +45,7 @@ class ValImgDiffusionAgentReal(ValAgentReal):
         )
 
     @torch.no_grad()
-    def run(self):
+    def run(self, num_steps=100):
 
         self.model.eval()
         losses = []
@@ -58,6 +58,9 @@ class ValImgDiffusionAgentReal(ValAgentReal):
         np.set_printoptions(precision=3, suppress=True)
         # from collections import namedtuple
         # Batch = namedtuple("Batch", "actions conditions")
+
+        predicted_action_unnorms = []
+        true_action_unnorms = []
 
         for i, batch in enumerate(self.dataloader):
 
@@ -89,21 +92,19 @@ class ValImgDiffusionAgentReal(ValAgentReal):
             true_action_unnorm = self.unnormalize_action(true_action)
             obs_unnorm = self.unnormalize_obs(batch.conditions["state"].cpu().numpy())
 
-            breakpoint()
+            predicted_action_unnorms.append(predicted_action_unnorm)
+            true_action_unnorms.append(true_action_unnorm)
+
+            # breakpoint()
 
             print(f"Batch {i} - Loss: {los.item()}")
-            if i == 1000:
+            if i == num_steps:
                 break
 
             # breakpoint()
 
-            # error = np.mean(np.abs(predicted_action - true_action))
-            # errors.append(error)
-
-        np.save(f"loss_full_{self.batch_size}.npy", losses)
+        np.save(os.path.join(self.result_path, f"loss_{i}.npy"), losses)
+        np.save(os.path.join(self.result_path, f"predicted_action_unnorm_{i}.npy"), predicted_action_unnorms)
+        np.save(os.path.join(self.result_path, f"true_action_unnorm_{i}.npy"), true_action_unnorms)
+        
         print(np.mean(losses))
-
-        # Plot
-        # import matplotlib.pyplot as plt
-        # plt.plot(errors)
-        # plt.savefig("error.png")

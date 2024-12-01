@@ -8,6 +8,8 @@ import torch
 import hydra
 import logging
 import random
+import os
+import re
 
 log = logging.getLogger(__name__)
 
@@ -33,20 +35,29 @@ class ValAgentReal:
 
         # Build model and load checkpoint
         self.model = hydra.utils.instantiate(cfg.model)
+        
+        # Get the result folder path
+        match = re.search(r'state_(\d+)\.pt$', cfg.model.network_path)
+        if match:
+            number = match.group(1)  # Extract the number part
+            self.result_path = os.path.join(os.path.dirname(cfg.model.network_path), number)
+            os.makedirs(self.result_path, exist_ok=True) 
+        else:
+            raise ValueError("Filename does not match the expected pattern 'state_<number>.pt'")
 
         # Eval params
         self.n_steps = cfg.n_steps
+        self.batch_size = 1
 
         self.dataset = hydra.utils.instantiate(cfg.train_dataset)
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,
-            batch_size=cfg.batch_size,
+            batch_size=self.batch_size,
             num_workers=4 if self.dataset.device == "cpu" else 0,
             shuffle=True,
             pin_memory=True if self.dataset.device == "cpu" else False,
         )
 
-        self.batch_size = cfg.batch_size
-
+        
     def run(self):
         pass

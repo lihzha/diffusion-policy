@@ -54,7 +54,6 @@ class DiffusionModel(nn.Module):
         if isinstance(device, int):
             device = f"cuda:{device}"
         self.device = device
-        print("Device: ", device)
         self.horizon_steps = horizon_steps
         self.obs_dim = obs_dim
         self.action_dim = action_dim

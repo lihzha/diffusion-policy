@@ -6,6 +6,7 @@ Evaluate pre-trained/DPPO-fine-tuned pixel-based diffusion policy.
 import numpy as np
 import torch
 import logging
+import matplotlib.pyplot as plt
 
 log = logging.getLogger(__name__)
 
@@ -103,20 +104,17 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
             ret = process_obs(obs, self.obs_min, self.obs_max, self.ordered_obs_keys)
         return torch.from_numpy(ret).float().to(self.device)
 
-    def process_multistep_img(self, obs, prev_obs=None):
-        # camera_idx = ['0', '2', '3']
-        camera_indices = ["0", "3"]
+    def process_multistep_img(self, obs, camera_indices, prev_obs=None):
         if self.n_img_cond_step == 2:  # TODO: better logic
             assert prev_obs
             images = {}
             for idx in camera_indices:
-                resized_images_1 = obs["image"][idx].transpose(2, 0, 1)
-                resized_images_2 = prev_obs["image"][idx].transpose(2, 0, 1)
-
+                image_1 = obs["image"][idx].transpose(2, 0, 1)
+                image_2 = prev_obs["image"][idx].transpose(2, 0, 1)
                 images[idx] = np.concatenate(
                     (
-                        resized_images_1[None, :][None, :],
-                        resized_images_2[None, :][None, :],
+                        image_1[None, None],
+                        image_2[None, None],
                     ),
                     axis=1,
                 )
@@ -125,8 +123,8 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
         else:
             images = {}
             for idx in camera_indices:
-                resized_images = obs["image"][idx].transpose(2, 0, 1)
-                images[idx] = resized_images[None, :][None, :]
+                image = obs["image"][idx].transpose(2, 0, 1)
+                images[idx] = image[None, None]
                 images[idx] = torch.from_numpy(images[idx]).to(self.device).float()
                 assert images[idx].shape == (1, 1, 3, 96, 96), images[idx].shape
         return images
@@ -144,7 +142,7 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
         if self.visualize:
             image_queues = {
                 "Camera 1": Queue(),
-                "Camera 2": Queue(),
+                # "Camera 2": Queue(),
                 "Camera 3": Queue(),
             }
             thread = threading.Thread(target=visualize_images, args=(image_queues,))
@@ -153,40 +151,47 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
         # Reset env before iteration starts
         self.model.eval()
         prev_obs = self.reset_env()
-        obs = prev_obs.copy()
-        self.env.camera_reader.set_trajectory_mode()
+        obs = prev_obs
         np.set_printoptions(precision=3, suppress=True)
+        camera_indices = ['2', '8']
 
+        # Check inference
         print("Warming up policy inference")
         with torch.no_grad():
             cond = {}
             cond["state"] = self.process_multistep_state(obs=obs, prev_obs=prev_obs)
-            cond["rgb"] = self.process_multistep_img(obs=obs, prev_obs=prev_obs)
-            print("RGB dimensions:", cond["rgb"]["0"].shape, cond["rgb"]["3"].shape)
+            cond["rgb"] = self.process_multistep_img(
+                obs=obs, 
+                camera_indices=camera_indices,
+                prev_obs=prev_obs,
+            )
+            print("RGB dimensions:", [cond["rgb"][idx].shape for idx in cond["rgb"].keys()])
             print("State dimensions:", cond["state"].shape)
-            samples = self.model(cond=cond, deterministic=True)
+            samples = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
             print(
                 "Predicted action chunk dimensions:",
-                samples.trajectories.cpu().numpy().shape,
+                samples.shape,
             )
-            naction = samples.trajectories.cpu().numpy()[
-                0, : self.act_steps
-            ]  # remove batch dimension
-            prev_obs = obs.copy()
+            naction = samples[0, : self.act_steps]  # remove batch dimension
+            prev_obs = obs
         action = self.unnormalize_action(naction)
-        print("Ready!")
+        
+        # Check images
+        for i in camera_indices:
+            plt.imshow(cond["rgb"][i][0, 0].cpu().numpy().transpose(1, 2, 0).astype(np.uint8))
+            plt.savefig(f"image_{i}.png")
+        input("Check images and then press anything to continue...")
 
         # TODO: some safety check making sure the sample predicted actions are not crazy
 
         # Run
         cond_states = []
-        # images = [[], [], []] # TODO
         images = [[], []]
         actions = []
         robot_states = [
             np.concatenate(
                 [
-                    obs["robot_state"]["cartesian_position"].copy(),
+                    obs["robot_state"]["cartesian_position"],
                     [obs["robot_state"]["gripper_position"]],
                 ]
             )
@@ -201,12 +206,17 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
                 with torch.no_grad():
                     cond = {}
                     cond["state"] = self.process_multistep_state(
-                        obs=obs, prev_obs=prev_obs
+                        obs=obs, 
+                        prev_obs=prev_obs,
                     )
-                    cond["rgb"] = self.process_multistep_img(obs=obs, prev_obs=prev_obs)
-                    cond_states.append(cond["state"].cpu().numpy().copy())
+                    cond["rgb"] = self.process_multistep_img(
+                        obs=obs,
+                        camera_indices=camera_indices, 
+                        prev_obs=prev_obs,
+                    )
+                    cond_states.append(cond["state"].cpu().numpy())
                     for i, k in enumerate(cond["rgb"].keys()):
-                        images[i].append(cond["rgb"][k].cpu().numpy().copy())
+                        images[i].append(cond["rgb"][k].cpu().numpy())
 
                     # Debug
                     if self.visualize:
@@ -214,25 +224,23 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
                             image_queues.items()
                         ):
                             # Create a blank image and draw some text
-                            image = images[i][-1][0, 0].copy().transpose(1, 2, 0)
+                            image = images[i][-1][0, 0].transpose(1, 2, 0)
                             # cv2.putText(image, f"{window_name}: Frame {step}", (20, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
                             # Add the image to the corresponding queue
                             image_queue.put(image)
                     print(
                         "State: ",
-                        self.unnormalize_obs(cond["state"].cpu().numpy().copy()),
+                        self.unnormalize_obs(cond["state"].cpu().numpy()),
                     )
                     pre_obs_end_time = time.time()
                     print(f"Pre-obs time: {pre_obs_end_time - pre_obs_start_time}")
 
                     # Run forward pass
-                    samples = self.model(cond=cond, deterministic=True)
-                    naction = samples.trajectories.cpu().numpy()[
-                        0, : self.act_steps
-                    ]  # remove batch dimension
+                    samples = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
+                    naction = samples[0, : self.act_steps]  # remove batch dimension
                 action = self.unnormalize_action(naction)
-                actions.append(action.copy())
+                actions.append(action)
 
                 # Debug
                 model_inf_end_time = time.time()
@@ -240,19 +248,14 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
                 print("Action: ", action)
 
                 # Run action chunk
-                for idx, a in enumerate(action):
-                    # if a[6] >= 0.5:
-                    #     a[6] = 1
-                    # else:
-                    #     a[6] = 0
+                for a in action:
+                    prev_obs = obs
                     self.env.step(a)
                     obs = self.env.get_observation()
-                    if idx == len(action) - 2:
-                        prev_obs = obs.copy()
                     robot_states.append(
                         np.concatenate(
                             [
-                                obs["robot_state"]["cartesian_position"].copy(),
+                                obs["robot_state"]["cartesian_position"],
                                 [obs["robot_state"]["gripper_position"]],
                             ]
                         )

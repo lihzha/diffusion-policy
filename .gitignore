@@ -16,14 +16,16 @@ logs/
 *.out
 *.err
 multiple.sh
-# single.sh
+single.sh
 *.png
 *.pt
 scp_ckpt.sh
 check_exp.sh
 interactive.sh
 *.pickle
-# multi_gpu.sh
+multi_gpu.sh
+
+scp.sh
 
 *.env
 *.npy
