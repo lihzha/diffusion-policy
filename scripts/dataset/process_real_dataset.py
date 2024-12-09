@@ -1,197 +1,266 @@
-import h5py
-import numpy as np
+"""
+Script for processing raw teleop data for policy training.
+
+Create a new folder and then save dataset and normalization values in the folder. Also save the config in txt.
+
+"""
+
 import os
+import numpy as np
+import h5py
 import cv2
+from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+import gc
+import time
 
 
-def load_hdf5_to_dict(
-    hdf5_file_path,
-    action_keys=["cartesian_position", "gripper_position"],  # "joint_positions"
-    observation_keys=["joint_positions", "gripper_position"],  # "joint_velocities"
-    use_image=True,
+def resize_image(args):
+    img, img_resolution = args
+    return cv2.resize(img, (img_resolution[1], img_resolution[0]))  # (W, H)
+
+
+def resize_images_multiprocessing(raw_img, img_resolution, num_thread=10):
+    args = [(raw_img[i], img_resolution) for i in range(raw_img.shape[0])]
+
+    # Use Pool for multiprocessing
+    with Pool(processes=num_thread) as pool:
+        resized_images = pool.map(resize_image, args)
+
+    resized_img = np.array(resized_images, dtype=np.uint8)
+    return resized_img
+
+
+def load_hdf5(
+    file_path,
+    action_keys=["cartesian_position", "gripper_position"],
+    observation_keys=["joint_positions", "gripper_position"],
+    load_image=True,
 ):
-    """
-    Load an HDF5 file into a nested dictionary, including only specified keys.
-
-    Parameters:
-    hdf5_file_path (str): Path to the HDF5 file.
-
-    Returns:
-    dict: A dictionary representation of the HDF5 file.
-    """
-    # Define keys to load in hierarchical form
-
+    """also get the raw indices of camera images"""
     keys_to_load = ["observation/timestamp/skip_action"]
-
     for key in action_keys:
         keys_to_load.append(f"action/{key}")
     for key in observation_keys:
         keys_to_load.append(f"observation/robot_state/{key}")
-    if use_image:
+    if load_image:
         keys_to_load.append("observation/image")
 
-    def should_load(path):
-        """Check if the current path should be loaded based on the specified keys."""
-        return any(path == key or path.startswith(f"{key}/") for key in keys_to_load)
-
-    def recursive_load(group, path=""):
-        """Recursively load a group into a dictionary, including only specified keys."""
-        result = {}
-        for key, item in group.items():
-            current_path = f"{path}/{key}".strip("/")
-            if isinstance(item, h5py.Group):
-                # If the item is a group, recurse into it
-                nested_result = recursive_load(item, current_path)
-                if nested_result:  # Only add if there's valid data in the nested result
-                    result[key] = nested_result
+    output = {}
+    camera_indices_raw = []
+    h5_file = h5py.File(file_path, "r")
+    for key in keys_to_load:
+        if key in h5_file:
+            if "image" in key:
+                for cam in h5_file[key].keys():
+                    output[f"{key}/{cam}"] = h5_file[f"{key}/{cam}"][()]
+                    camera_indices_raw.append(int(cam))
             else:
-                # If the item is a dataset, store it as a numpy array if it's a key to load
-                if should_load(current_path):
-                    result[key] = item[()]
-        return result
+                output[key] = h5_file[key][()]
+        else:
+            print(f"Key '{key}' not found in the HDF5 file.")
 
-    with h5py.File(hdf5_file_path, "r") as file:
-        return recursive_load(file)
+    # make sure to close h5 file
+    for obj in gc.get_objects():
+        if isinstance(obj, h5py.File):
+            try:
+                obj.close()
+            except:
+                pass
+    return output, camera_indices_raw
 
 
 def process_real_dataset(
-    dataset_path,
-    use_image=True,
-    action_keys=["joint_position", "gripper_position"],  # "cartesian_position"
-    observation_keys=[
-        "joint_positions",
-        "gripper_position",
-    ],  # "joint_velocities", "cartesian_position"):
-    img_resolution=(96, 96),  # (H, W)
-    bgr2rgb=True,
-    camera_idx = ["0", "3"]  #'2' is right camera, '0' is left camera, '3' is wrist camera
+    input_paths,
+    output_parent_dir,
+    num_traj=None,
+    action_keys=["joint_position", "gripper_position"],
+    observation_keys=["joint_positions", "gripper_position"],
+    horizon_steps=16,
+    img_resolution=(96, 96),
+    camera_indices=["0", "2"],
+    num_thread=10,
+    skip_image=False,
+    keep_bgr=False,
 ):
+    save_image = not skip_image
+    bgr2rgb = not keep_bgr
 
-    dataset = {"traj_lengths": [], "actions": [], "states": [], "images": {key: [] for key in camera_idx}}
+    # concatenate all paths
+    traj_paths = []
+    for path in input_paths:
+        traj_paths += [
+            os.path.join(path, traj_name)
+            for traj_name in os.listdir(path)
+            if traj_name.endswith(".h5")
+        ]
+    num_traj_available = len(traj_paths)
 
-    for traj_idx, file in enumerate(os.listdir(dataset_path)):
-        if file.endswith(".h5"):
-            traj = load_hdf5_to_dict(
-                os.path.join(dataset_path, file),
-                action_keys=action_keys,
-                observation_keys=observation_keys,
-                use_image=use_image,
+    # process first trajectories
+    if num_traj is not None:
+        traj_paths = traj_paths[:num_traj]
+    else:
+        num_traj = num_traj_available
+    print(
+        f"Processing {num_traj}/{num_traj_available} trajectories with {cpu_count()} cpu threads..."
+    )
+
+    # initialize output dictionary
+    output = {
+        "traj_lengths": [],
+        "actions": [],
+        "states": [],
+        "images": {index: [] for index in camera_indices},
+    }
+    state_action_diff_mins = []
+    state_action_diff_maxs = []
+    for traj_path in tqdm(traj_paths):
+
+        # load trajectory from h5
+        s1 = time.time()
+        traj, camera_indices_raw = load_hdf5(
+            traj_path,
+            action_keys=action_keys,
+            observation_keys=observation_keys,
+            load_image=save_image,
+        )
+        print("Time to load h5:", time.time() - s1)
+
+        # skip idle actions (skip_action == True)
+        keep_idx = ~traj["observation/timestamp/skip_action"]
+        traj_length = len(keep_idx)
+        output["traj_lengths"].append(traj_length)
+        print("Path:", traj_path, "Length:", traj_length)
+
+        # set gripper position to binary: 0 for open, 1 for closed
+        if "gripper_position" in action_keys:
+            traj["action/gripper_position"] = (
+                traj["action/gripper_position"] > 0.5
+            ).astype(np.float32)
+        if "gripper_position" in observation_keys:
+            traj["observation/robot_state/gripper_position"] = (
+                traj["observation/robot_state/gripper_position"] > 0.5
+            ).astype(np.float32)
+
+        # set roll to always be positive
+        if "cartesian_position" in action_keys:
+            traj["action/cartesian_position"][:, 3] = np.abs(
+                traj["action/cartesian_position"][:, 3]
+            )
+        if "cartesian_position" in observation_keys:
+            traj["observation/robot_state/cartesian_position"][:, 3] = np.abs(
+                traj["observation/robot_state/cartesian_position"][:, 3]
             )
 
-            keep_idx = ~traj["observation"]["timestamp"]["skip_action"]
-            dataset["traj_lengths"].append(np.sum(keep_idx))
-            
-            if "gripper_position" in action_keys:
-                for i in range(len(traj["action"]["gripper_position"])):
-                    if traj["action"]["gripper_position"][i] <= 0.5:
-                        traj["action"]["gripper_position"][i] = 0.0
-                    else:
-                        traj["action"]["gripper_position"][i] = 1.0
+        # add dimension to gripper position
+        if "gripper_position" in action_keys:
+            traj["action/gripper_position"] = traj["action/gripper_position"][:, None]
+        if "gripper_position" in observation_keys:
+            traj["observation/robot_state/gripper_position"] = traj[
+                "observation/robot_state/gripper_position"
+            ][:, None]
 
-            if "cartesian_position" in action_keys:
-                for i in range(len(traj["action"]["cartesian_position"])):
-                    traj["action"]["cartesian_position"][i, 3] = np.abs(
-                        traj["action"]["cartesian_position"][i, 3]
-                    )  # flip roll angle
+        # get the maximum difference between the starting state and each action of the chunk at each timestep
+        if "joint_positions" in observation_keys and "joint_position" in action_keys:
+            state = traj["observation/robot_state/joint_positions"][keep_idx]
+            action = traj["action/joint_position"][keep_idx]
+        elif (
+            "cartesian_position" in observation_keys
+            and "cartesian_position" in action_keys
+        ):
+            state = traj["observation/robot_state/cartesian_position"][keep_idx]
+            action = traj["action/cartesian_position"][keep_idx]
+        else:
+            raise NotImplementedError(
+                "For getting the state-action difference, need consistent keys"
+            )
+        diffs = np.empty((0, action.shape[1]))
+        for step in range(horizon_steps // 4, horizon_steps):  # skip early steps
+            diff = action[step:] - state[:-step]
+            diffs = np.concatenate([diffs, diff], axis=0)
+        state_action_diff_mins.append(np.min(diffs, axis=0))
+        state_action_diff_maxs.append(np.max(diffs, axis=0))
+        if np.isnan(np.sum(diffs)) > 0 or np.isnan(np.sum(diffs)) > 0:
+            raise ValueError("NaN in state-action difference")
 
-            dataset["actions"].append(
-                np.concatenate(
-                    [
-                        (
-                            traj["action"][action_keys[i]][keep_idx]
-                            if action_keys[i] != "gripper_position"
-                            else traj["action"][action_keys[i]][keep_idx, None]
-                        )
-                        for i in range(len(action_keys))
-                    ],
-                    axis=1,
+        # concatenate states and actions
+        states = np.concatenate(
+            [
+                traj[f"observation/robot_state/{observation_keys[i]}"][keep_idx]
+                for i in range(len(observation_keys))
+            ],
+            axis=1,
+        )
+        actions = np.concatenate(
+            [
+                traj[f"action/{action_keys[i]}"][keep_idx]
+                for i in range(len(action_keys))
+            ],
+            axis=1,
+        )
+        assert len(states) == output["traj_lengths"][-1]
+        assert len(actions) == output["traj_lengths"][-1]
+        output["states"].append(states)
+        output["actions"].append(actions)
+
+        # add images
+        if save_image:
+            # verify camera indices
+            camera_indices_chosen = [camera_indices_raw[idx] for idx in camera_indices]
+            print(f"Using raw camera indices: {camera_indices_chosen}")
+            for raw_idx, idx in zip(camera_indices_chosen, camera_indices):
+                raw_img = traj[f"observation/image/{raw_idx}"][keep_idx]  # (T, H, W, C)
+                assert raw_img.dtype == np.uint8
+
+                # resize with multiprocessing
+                s1 = time.time()
+                resized_img = resize_images_multiprocessing(
+                    raw_img,
+                    img_resolution,
+                    num_thread,
                 )
-            )
+                print("Time to resize images:", time.time() - s1)
 
-            if "gripper_position" in observation_keys:
-                for i in range(
-                    len(traj["observation"]["robot_state"]["gripper_position"])
-                ):
-                    if (
-                        traj["observation"]["robot_state"]["gripper_position"][i]
-                        <= 0.5
-                    ):
-                        traj["observation"]["robot_state"]["gripper_position"][i] = 0.0
-                    else:
-                        traj["observation"]["robot_state"]["gripper_position"][i] = 1.0
+                # Transpose to (T, C, H, W)
+                resized_img = resized_img.transpose(0, 3, 1, 2)
 
-            if "cartesian_position" in observation_keys:
-                for i in range(
-                    len(traj["observation"]["robot_state"]["cartesian_position"])
-                ):
-                    traj["observation"]["robot_state"]["cartesian_position"][i, 3] = (
-                        np.abs(
-                            traj["observation"]["robot_state"]["cartesian_position"][
-                                i, 3
-                            ]
-                        )
-                    )
+                # Change BGR (cv2 default) to RGB
+                if bgr2rgb:
+                    resized_img = resized_img[:, [2, 1, 0]]
 
-            states = np.concatenate(
-                [
-                    (
-                        traj["observation"]["robot_state"][observation_keys[i]][keep_idx]
-                        if observation_keys[i] != "gripper_position"
-                        else traj["observation"]["robot_state"][observation_keys[i]][
-                            keep_idx, None
-                        ]
-                    )
-                    for i in range(len(observation_keys))
-                ],
-                axis=1,
-            )
-            
-            assert len(states) == dataset["traj_lengths"][-1]
-            assert len(dataset["actions"][-1]) == dataset["traj_lengths"][-1]
-            
-            dataset["states"].append(states)
-            
-            if use_image:
-                assert isinstance(traj["observation"]["image"], dict), "Only support multiple camera images"
-                for idx in camera_idx:                    
-                    raw_img = traj["observation"]["image"][idx][keep_idx]  # (T, H, W, C)
-                    resized_img = np.empty(
-                        (raw_img.shape[0], 3, *img_resolution), dtype=raw_img.dtype
-                    )
-                    for i in range(raw_img.shape[0]):
-                        resized_img[i] = cv2.resize(
-                            raw_img[i], (img_resolution[1], img_resolution[0])  # (W, H)
-                        ).transpose(2, 0, 1)
-                        # From BGR to RGB
-                        if bgr2rgb:
-                            resized_img[i] = resized_img[i][[2, 1, 0], :, :]
-                    dataset["images"][idx].append(resized_img.copy())
-                    assert len(dataset["images"][idx][-1]) == dataset["traj_lengths"][-1]
-                
+                # save
+                assert len(resized_img) == output["traj_lengths"][-1]
+                output["images"][idx].append(resized_img)
 
-    print(f"Loaded {len(dataset['traj_lengths'])} trajectories")
-    dataset["traj_lengths"] = np.array(dataset["traj_lengths"])
-    dataset["actions"] = np.concatenate(dataset["actions"], axis=0)
-    dataset["states"] = np.concatenate(dataset["states"], axis=0)
-    for idx in camera_idx:
-        dataset["images"][idx] = np.concatenate(dataset["images"][idx], axis=0)
-    print("Images shape: ", dataset["images"][camera_idx[0]].shape)
-        
+    # Convert to numpy arrays
+    output["traj_lengths"] = np.array(output["traj_lengths"])
+    output["actions"] = np.concatenate(output["actions"], axis=0)
+    output["states"] = np.concatenate(output["states"], axis=0)
+    for idx in camera_indices:
+        output["images"][idx] = np.concatenate(output["images"][idx], axis=0)
+    print("\n\n=========\nImages shape: ", output["images"][camera_indices[0]].shape)
+
     # Normalize states and actions to [-1, 1]
-    obs_min = np.min(dataset["states"], axis=0)
-    obs_max = np.max(dataset["states"], axis=0)
-    action_min = np.min(dataset["actions"], axis=0)
-    action_max = np.max(dataset["actions"], axis=0)
-    dataset["states"] = (
-        2 * (dataset["states"] - obs_min) / (obs_max - obs_min + 1e-6) - 1
+    obs_min = np.min(output["states"], axis=0)
+    obs_max = np.max(output["states"], axis=0)
+    action_min = np.min(output["actions"], axis=0)
+    action_max = np.max(output["actions"], axis=0)
+    output["raw_states"] = output["states"].copy()
+    output["raw_actions"] = output["actions"].copy()
+    output["states"] = 2 * (output["states"] - obs_min) / (obs_max - obs_min + 1e-6) - 1
+    output["actions"] = (
+        2 * (output["actions"] - action_min) / (action_max - action_min + 1e-6) - 1
     )
-    dataset["actions"] = (
-        2 * (dataset["actions"] - action_min) / (action_max - action_min + 1e-6) - 1
-    )
+    print("States min (after normalization):", np.min(output["states"], axis=0))
+    print("States max (after normalization):", np.max(output["states"], axis=0))
+    print("Actions min (after normalization):", np.min(output["actions"], axis=0))
+    print("Actions max (after normalization):", np.max(output["actions"], axis=0))
 
-    # Save normalization values to .npz
-    
-    
+    # Get min and max of state-action difference
+    state_action_diff_min = np.min(np.stack(state_action_diff_mins), axis=0)
+    state_action_diff_max = np.max(np.stack(state_action_diff_maxs), axis=0)
+
+    # Configure dataset name based on keys
     dataset_name = ""
     if "cartesian_position" in observation_keys:
         dataset_name += "eef"
@@ -204,10 +273,9 @@ def process_real_dataset(
     if "gripper_position" in observation_keys:
         dataset_name += "g"
     dataset_name += "_"
-    
     if "cartesian_position" in action_keys:
         dataset_name += "eef"
-    if "joint_positions" in action_keys:
+    if "joint_position" in action_keys:
         assert "cartesian_position" not in action_keys
         dataset_name += "js"
     if "joint_velocities" in action_keys:
@@ -215,66 +283,129 @@ def process_real_dataset(
         dataset_name += "jv"
     if "gripper_position" in action_keys:
         dataset_name += "g"
-    
-    if use_image:
+    if save_image:
         dataset_name += "_"
-        dataset_name += f"{len(camera_idx)}cam"
+        dataset_name += f"{len(camera_indices)}cam"
         dataset_name += f"_{img_resolution[0]}"
-    
-        
+
+    # Create output directory
+    output_dir = os.path.join(output_parent_dir, dataset_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save config into a text file
+    config = {
+        "action_keys": action_keys,
+        "observation_keys": observation_keys,
+        "img_resolution": img_resolution,
+        "camera_indices": camera_indices,
+        "bgr2rgb": bgr2rgb,
+        "obs_min": obs_min,
+        "obs_max": obs_max,
+        "action_min": action_min,
+        "action_max": action_max,
+        "delta_min": state_action_diff_min,
+        "delta_max": state_action_diff_max,
+        "num_traj": len(traj_paths),
+    }
+    with open(os.path.join(output_dir, "config.txt"), "w") as f:
+        for key, value in config.items():
+            f.write(f"{key}: {value}\n")
+
+    # Save the normalization values and processed dataset
     np.savez(
-        os.path.join(os.path.dirname(dataset_path), f"norm_{dataset_name}.npz"),
+        os.path.join(output_dir, f"norm.npz"),
         obs_min=obs_min,
         obs_max=obs_max,
         action_min=action_min,
         action_max=action_max,
+        delta_min=state_action_diff_min,
+        delta_max=state_action_diff_max,
     )
-    # Save the dataset as a compressed numpy file
     np.savez_compressed(
-        os.path.join(os.path.dirname(dataset_path), f"dataset_{dataset_name}.npz"),
-        **dataset,
+        os.path.join(output_dir, f"dataset.npz"),
+        **output,
     )
-
-
-def get_no_vel_dataset(dataset_path):
-    processed_dataset_path = os.path.join(dataset_path, "processed_dataset.npz")
-    processed_norm_path = os.path.join(dataset_path, "norm.npz")
-
-    dataset = np.load(processed_dataset_path, allow_pickle=True)
-    states = dataset["states"]
-    states = np.concatenate([states[:, :7], states[:, -1:]], axis=1)
-    new_dataset = {
-        key: dataset[key] if key != "states" else states for key in dataset.files
-    }
-
-    np.savez_compressed(
-        os.path.join(
-            os.path.dirname(processed_dataset_path), "processed_dataset_no_vel.npz"
-        ),
-        **new_dataset,
-    )
-
-    norm = np.load(processed_norm_path)
-    new_norm = {
-        key: (
-            norm[key]
-            if "obs" not in key
-            else np.concatenate([norm[key][:7], norm[key][-1:]])
-        )
-        for key in norm.files
-    }
-    np.savez(
-        os.path.join(os.path.dirname(processed_norm_path), "norm_no_vel.npz"),
-        **new_norm,
-    )
+    print("Data and normalization values saved in", output_dir)
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/lab/guided-data-collection/data/tomato_plate_trials-date?"
-    process_real_dataset(dataset_path, use_image=True, camera_idx=["0"], bgr2rgb=True, img_resolution=(196, 196), 
-                         action_keys=["joint_position", "gripper_position"], observation_keys=["joint_positions", "gripper_position"])
-    
-    
-    # get_no_vel_dataset(dataset_path)
-    # d = np.load("/home/lab/droid/traj_data/norm_no_vel.npz", allow_pickle=True)
-    # print(d['obs_min'].shape)
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-in",
+        "--input_paths",
+        type=str,
+        nargs="+",
+        required=True,
+    )
+    parser.add_argument(
+        "-out",
+        "--output_parent_dir",
+        type=str,
+        required=True,
+    )
+    parser.add_argument(
+        "-n",
+        "--num_traj",
+        type=int,
+        default=None,  # None for processing all available ones
+    )
+    parser.add_argument(
+        "-t",
+        "--num_thread",
+        type=int,
+        default=10,
+    )
+    parser.add_argument(
+        "-c",
+        "--camera_indices",
+        type=int,
+        nargs="+",
+        default=[0, 2],
+        help="Raw data uses index from cv2, which might be something like [2, 4, 8]. We will use the index from the raw data, in this case, 0, 1, 2",
+    )
+    parser.add_argument(
+        "-res",
+        "--img_resolution",
+        type=int,
+        nargs=2,
+        default=[192, 192],
+    )
+    parser.add_argument(
+        "-a",
+        "--action_keys",
+        type=str,
+        nargs="+",
+        default=[
+            "joint_position",
+            "gripper_position",
+        ],  # "cartesian_position"
+    )
+    parser.add_argument(
+        "-o",
+        "--observation_keys",
+        type=str,
+        nargs="+",
+        default=[
+            "joint_positions",
+            "gripper_position",
+        ],  # "joint_velocities", "cartesian_positions"
+    )
+    parser.add_argument(
+        "-tp",
+        "--horizon_steps",
+        type=int,
+        default=16,  # we are not saving action chunks, but to get the maximum difference between the state and each step of action, for delta actions
+    )
+    parser.add_argument(
+        "--skip_image",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--keep_bgr",
+        action="store_true",
+    )
+
+    args = parser.parse_args()
+    process_real_dataset(**vars(args))

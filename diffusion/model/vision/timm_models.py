@@ -217,8 +217,8 @@ class ResNetEncoder(TimmEncoder):
             lora_rank=lora_rank,
         )
 
-        if use_group_norm:
-            assert not pretrained
+        if use_group_norm and not pretrained:
+            # assert not pretrained
             if isinstance(self.model, nn.ModuleList):
                 for i in range(num_views):
                     self.model[i] = replace_submodules(

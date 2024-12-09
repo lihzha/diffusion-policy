@@ -35,15 +35,19 @@ class ValAgentReal:
 
         # Build model and load checkpoint
         self.model = hydra.utils.instantiate(cfg.model)
-        
+
         # Get the result folder path
-        match = re.search(r'state_(\d+)\.pt$', cfg.model.network_path)
+        match = re.search(r"state_(\d+)\.pt$", cfg.model.network_path)
         if match:
             number = match.group(1)  # Extract the number part
-            self.result_path = os.path.join(os.path.dirname(cfg.model.network_path), number)
-            os.makedirs(self.result_path, exist_ok=True) 
+            self.result_path = os.path.join(
+                os.path.dirname(cfg.model.network_path), number
+            )
+            os.makedirs(self.result_path, exist_ok=True)
         else:
-            raise ValueError("Filename does not match the expected pattern 'state_<number>.pt'")
+            raise ValueError(
+                "Filename does not match the expected pattern 'state_<number>.pt'"
+            )
 
         # Eval params
         self.n_steps = cfg.n_steps
@@ -58,6 +62,5 @@ class ValAgentReal:
             pin_memory=True if self.dataset.device == "cpu" else False,
         )
 
-        
     def run(self):
         pass

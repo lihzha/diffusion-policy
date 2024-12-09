@@ -1,5 +1,5 @@
 """
-Pre-training diffusion policy
+Train diffusion policy
 
 """
 
@@ -22,18 +22,20 @@ class TrainDiffusionAgent(PreTrainAgent):
 
     def __init__(self, cfg):
         super().__init__(cfg)
-        self.debug = cfg.debug
 
     def run(self):
 
         timer = Timer()
         self.epoch = 1
         for epoch in range(self.n_epochs):
+
+            # multi-gpu chore
             if self.num_gpus > 1:
                 import torch.distributed as dist
 
                 dist.barrier()
                 self.dataloader_train.sampler.set_epoch(epoch)
+
             # train
             loss_train_epoch = []
             cnt_batch = 0
@@ -63,7 +65,6 @@ class TrainDiffusionAgent(PreTrainAgent):
                 cnt_batch += 1
             loss_train = np.mean(loss_train_epoch)
 
-            del batch_train
             # validate
             loss_val_epoch = []
             if self.dataloader_val is not None and self.epoch % self.val_freq == 0:

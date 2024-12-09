@@ -72,13 +72,8 @@ class VisionDiffusionMLP(nn.Module):
             state: (B, To, Do)
             rgb: (B, To, C, H, W)
 
-        TODO long term: more flexible handling of cond
         """
         B, Ta, Da = x.shape
-        # if isinstance(cond["rgb"], dict):
-        #     _, T_rgb, C, H, W = next(iter(cond["rgb"].values())).shape
-        # else:
-        #     _, T_rgb, C, H, W = cond["rgb"].shape
 
         # flatten chunk
         x = x.view(B, -1)
@@ -86,36 +81,8 @@ class VisionDiffusionMLP(nn.Module):
         # flatten history
         state = cond["state"].view(B, -1)
 
-        # Take recent images --- sometimes we want to use fewer img_cond_steps than cond_steps (e.g., 1 image but 3 prio)
+        # visual encoder
         rgb = cond["rgb"].copy()
-
-        # rgb = cond["rgb"][:, -self.img_cond_steps :]
-
-        ## concatenate images in cond by channels
-        # if self.num_img > 1:
-        #     rgb = rgb.reshape(B, T_rgb, self.num_img, 3, H, W)
-        #     rgb = einops.rearrange(rgb, "b t n c h w -> b n (t c) h w")
-        # else:
-        # rgb = einops.rearrange(rgb, "b t c h w -> b (t c) h w")
-
-        ## convert rgb to float32 for augmentation
-        # rgb = rgb.float()
-
-        # # get vit output - pass in two images separately
-        # if self.num_img > 1:  # TODO: properly handle multiple images
-        #     rgb1 = rgb[:, 0]
-        #     rgb2 = rgb[:, 1]
-        #     if self.augment:
-        #         rgb1 = self.aug(rgb1)
-        #         rgb2 = self.aug(rgb2)
-        #     feat1 = self.backbone(rgb1)
-        #     feat2 = self.backbone(rgb2)
-        #     feat1 = self.compress1.forward(feat1, state)
-        #     feat2 = self.compress2.forward(feat2, state)
-        #     feat = torch.cat([feat1, feat2], dim=-1)
-        # else:  # single image
-        # if self.augment:
-        #     rgb = self.aug(rgb)
         feat = self.backbone(rgb, state)  # [batch, num_patch, embed_dim]
         cond_encoded = torch.cat([feat, state], dim=-1)
 

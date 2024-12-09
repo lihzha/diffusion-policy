@@ -138,6 +138,7 @@ class Unet1D(nn.Module):
         in_out = list(zip(dims[:-1], dims[1:]))
         log.info(f"Channel dimensions: {in_out}")
 
+        # timestep embedding
         dsed = diffusion_step_embed_dim
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(dsed),
@@ -145,6 +146,8 @@ class Unet1D(nn.Module):
             nn.Mish(),
             nn.Linear(dsed * 4, dsed),
         )
+
+        # additional obs encoder
         if cond_mlp_dims is not None:
             self.cond_mlp = ResidualMLP(
                 dim_list=[cond_dim] + cond_mlp_dims,
@@ -156,6 +159,7 @@ class Unet1D(nn.Module):
             cond_block_dim = dsed + cond_dim
         use_large_encoder_in_block = cond_mlp_dims is None and not smaller_encoder
 
+        # conv modules
         mid_dim = dims[-1]
         self.mid_modules = nn.ModuleList(
             [
@@ -183,7 +187,6 @@ class Unet1D(nn.Module):
                 ),
             ]
         )
-
         self.down_modules = nn.ModuleList([])
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (len(in_out) - 1)
@@ -216,7 +219,6 @@ class Unet1D(nn.Module):
                     ]
                 )
             )
-
         self.up_modules = nn.ModuleList([])
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (len(in_out) - 1)
@@ -249,7 +251,6 @@ class Unet1D(nn.Module):
                     ]
                 )
             )
-
         self.final_conv = nn.Sequential(
             Conv1dBlock(
                 dim,
@@ -344,15 +345,15 @@ class VisionUnet1D(nn.Module):
         groupnorm_eps=1e-5,
     ):
         super().__init__()
+        dims = [action_dim, *map(lambda m: dim * m, dim_mults)]
+        in_out = list(zip(dims[:-1], dims[1:]))
+        log.info(f"Channel dimensions: {in_out}")
 
         # vision
         self.backbone = backbone
         visual_feature_dim = self.backbone.repr_dim
 
-        dims = [action_dim, *map(lambda m: dim * m, dim_mults)]
-        in_out = list(zip(dims[:-1], dims[1:]))
-        log.info(f"Channel dimensions: {in_out}")
-
+        # timestep embedding
         dsed = diffusion_step_embed_dim
         self.time_mlp = nn.Sequential(
             SinusoidalPosEmb(dsed),
@@ -361,6 +362,7 @@ class VisionUnet1D(nn.Module):
             nn.Linear(dsed * 4, dsed),
         )
 
+        # additional obs encoder
         if cond_mlp_dims is not None:
             self.cond_mlp = ResidualMLP(
                 dim_list=[cond_dim] + cond_mlp_dims,
@@ -372,6 +374,7 @@ class VisionUnet1D(nn.Module):
             cond_block_dim = dsed + cond_dim + visual_feature_dim
         use_large_encoder_in_block = cond_mlp_dims is None and not smaller_encoder
 
+        # conv modules
         mid_dim = dims[-1]
         self.mid_modules = nn.ModuleList(
             [
@@ -399,7 +402,6 @@ class VisionUnet1D(nn.Module):
                 ),
             ]
         )
-
         self.down_modules = nn.ModuleList([])
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (len(in_out) - 1)
@@ -432,7 +434,6 @@ class VisionUnet1D(nn.Module):
                     ]
                 )
             )
-
         self.up_modules = nn.ModuleList([])
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (len(in_out) - 1)
@@ -465,7 +466,6 @@ class VisionUnet1D(nn.Module):
                     ]
                 )
             )
-
         self.final_conv = nn.Sequential(
             Conv1dBlock(
                 dim,
@@ -506,7 +506,7 @@ class VisionUnet1D(nn.Module):
         # visual encoder
         rgb = cond["rgb"].copy()
         vis_feat = self.backbone(rgb, state)  # [batch, embed_dim]
-        
+
         # global features
         cond_encoded = torch.cat([vis_feat, state], dim=-1)
 
@@ -543,6 +543,6 @@ class VisionUnet1D(nn.Module):
             x = upsample(x)
 
         x = self.final_conv(x)
-        
+
         x = einops.rearrange(x, "b t h -> b h t")
         return x

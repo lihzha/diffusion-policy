@@ -83,7 +83,7 @@ def _main(cfg: OmegaConf):
 @hydra.main(
     version_base=None,
     config_path=os.path.join(os.getcwd(), "guided_dc/cfg/real/pick_and_place"),
-    config_name="diffusion_unet_img.yaml",
+    config_name="diffusion_unet.yaml",
 )
 def main(cfg: OmegaConf):
 

@@ -60,9 +60,10 @@ def process_obs(obs, obs_min, obs_max, ordered_obs_keys):
             for i in range(len(ordered_obs_keys))
         ]
     )[None, :]
+
+    # Normalize
     obs = 2 * (obs - obs_min) / (obs_max - obs_min + 1e-6) - 1
     obs = np.clip(obs, -1, 1)
-    # obs[0,3] = np.abs(obs[0,3])
     return obs
 
 
@@ -71,25 +72,12 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
     def __init__(self, cfg):
         super().__init__(cfg)
 
-        # Set obs dim -  we will save the different obs in batch in a dict
-        self.ordered_obs_keys = cfg.ordered_obs_keys
-        shape_meta = cfg.shape_meta
-        self.obs_dims = {k: shape_meta.obs[k]["shape"] for k in shape_meta.obs}
-        self.normalization_stats_path = cfg.normalization_stats_path
-        self.normalization_stats = np.load(
-            self.normalization_stats_path, allow_pickle=True
-        )
-        self.obs_min = self.normalization_stats["obs_min"]
-        self.obs_max = self.normalization_stats["obs_max"]
-        self.action_min = self.normalization_stats["action_min"]
-        self.action_max = self.normalization_stats["action_max"]
-
         # visualize img observations
         self.visualize = cfg.get("visualize", False)
 
     def process_multistep_state(self, obs, prev_obs=None):
-        if prev_obs is not None:
-            assert self.n_cond_step == 2
+        if self.n_cond_step == 2:
+            assert prev_obs
             ret = np.stack(
                 (
                     process_obs(
@@ -102,15 +90,20 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
         else:
             assert self.n_cond_step == 1
             ret = process_obs(obs, self.obs_min, self.obs_max, self.ordered_obs_keys)
-        return torch.from_numpy(ret).float().to(self.device)
+        ret = torch.from_numpy(ret).float().to(self.device)
 
-    def process_multistep_img(self, obs, camera_indices, prev_obs=None):
+        # TODO: use config
+        # round gripper position
+        ret[:, -1] = torch.round(ret[:, -1])
+        return ret
+
+    def process_multistep_img(self, obs, camera_indices, prev_obs=None, bgr2rgb=True):
         if self.n_img_cond_step == 2:  # TODO: better logic
             assert prev_obs
             images = {}
             for idx in camera_indices:
-                image_1 = obs["image"][idx].transpose(2, 0, 1)
-                image_2 = prev_obs["image"][idx].transpose(2, 0, 1)
+                image_1 = obs["image"][idx].transpose(2, 0, 1).copy()
+                image_2 = prev_obs["image"][idx].transpose(2, 0, 1).copy()
                 images[idx] = np.concatenate(
                     (
                         image_1[None, None],
@@ -118,15 +111,19 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
                     ),
                     axis=1,
                 )
+                if bgr2rgb:
+                    images[idx] = images[idx][:, :, ::-1, :, :].copy()
                 images[idx] = torch.from_numpy(images[idx]).to(self.device).float()
-                assert images[idx].shape == (1, 2, 3, 96, 96), images[idx].shape
         else:
             images = {}
+
             for idx in camera_indices:
-                image = obs["image"][idx].transpose(2, 0, 1)
+                image = obs["image"][idx].transpose(2, 0, 1).copy()
                 images[idx] = image[None, None]
+                if bgr2rgb:
+                    images[idx] = images[idx][:, :, ::-1, :, :].copy()
+
                 images[idx] = torch.from_numpy(images[idx]).to(self.device).float()
-                assert images[idx].shape == (1, 1, 3, 96, 96), images[idx].shape
         return images
 
     def unnormalize_action(self, naction):
@@ -134,6 +131,16 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
             self.action_max - self.action_min + 1e-6
         ) / 2 + self.action_min
         return action
+
+    def unnormalized_delta_action(self, naction, state):
+        action = (naction[:, :-1] + 1) * (
+            self.delta_max - self.delta_min + 1e-6
+        ) / 2 + self.delta_min
+        action += state[:, :-1]  # skip gripper
+        gripper_action = (naction[:, -1:] + 1) * (
+            self.action_max[-1] - self.action_min[-1] + 1e-6
+        ) / 2 + self.action_min[-1]
+        return np.concatenate([action, gripper_action], axis=-1)
 
     def unnormalize_obs(self, state):
         return (state + 1) * (self.obs_max - self.obs_min + 1e-6) / 2 + self.obs_min
@@ -153,7 +160,7 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
         prev_obs = self.reset_env()
         obs = prev_obs
         np.set_printoptions(precision=3, suppress=True)
-        camera_indices = ['2', '8']
+        camera_indices = ["2", "8"]
 
         # Check inference
         print("Warming up policy inference")
@@ -161,24 +168,37 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
             cond = {}
             cond["state"] = self.process_multistep_state(obs=obs, prev_obs=prev_obs)
             cond["rgb"] = self.process_multistep_img(
-                obs=obs, 
+                obs=obs,
                 camera_indices=camera_indices,
                 prev_obs=prev_obs,
+                bgr2rgb=True,
             )
-            print("RGB dimensions:", [cond["rgb"][idx].shape for idx in cond["rgb"].keys()])
+            print(
+                "RGB dimensions:",
+                [cond["rgb"][idx].shape for idx in cond["rgb"].keys()],
+            )
             print("State dimensions:", cond["state"].shape)
-            samples = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
+            samples = (
+                self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
+            )
             print(
                 "Predicted action chunk dimensions:",
                 samples.shape,
             )
             naction = samples[0, : self.act_steps]  # remove batch dimension
             prev_obs = obs
-        action = self.unnormalize_action(naction)
-        
+        if self.use_delta_actions:
+            cur_state = self.unnormalize_obs(cond["state"].cpu().numpy())
+            action = self.unnormalized_delta_action(naction, cur_state)
+        else:
+            action = self.unnormalize_action(naction)
+        print("Action:", action)
+
         # Check images
         for i in camera_indices:
-            plt.imshow(cond["rgb"][i][0, 0].cpu().numpy().transpose(1, 2, 0).astype(np.uint8))
+            plt.imshow(
+                cond["rgb"][i][0, 0].cpu().numpy().transpose(1, 2, 0).astype(np.uint8)
+            )
             plt.savefig(f"image_{i}.png")
         input("Check images and then press anything to continue...")
 
@@ -206,13 +226,14 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
                 with torch.no_grad():
                     cond = {}
                     cond["state"] = self.process_multistep_state(
-                        obs=obs, 
+                        obs=obs,
                         prev_obs=prev_obs,
                     )
                     cond["rgb"] = self.process_multistep_img(
                         obs=obs,
-                        camera_indices=camera_indices, 
+                        camera_indices=camera_indices,
                         prev_obs=prev_obs,
+                        bgr2rgb=True,
                     )
                     cond_states.append(cond["state"].cpu().numpy())
                     for i, k in enumerate(cond["rgb"].keys()):
@@ -237,9 +258,17 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
                     print(f"Pre-obs time: {pre_obs_end_time - pre_obs_start_time}")
 
                     # Run forward pass
-                    samples = self.model(cond=cond, deterministic=True).trajectories.cpu().numpy()
+                    samples = (
+                        self.model(cond=cond, deterministic=True)
+                        .trajectories.cpu()
+                        .numpy()
+                    )
                     naction = samples[0, : self.act_steps]  # remove batch dimension
-                action = self.unnormalize_action(naction)
+                if self.use_delta_actions:
+                    cur_state = self.unnormalize_obs(cond["state"].cpu().numpy())
+                    action = self.unnormalized_delta_action(naction, cur_state)
+                else:
+                    action = self.unnormalize_action(naction)
                 actions.append(action)
 
                 # Debug
@@ -274,7 +303,7 @@ class EvalImgDiffusionAgentReal(EvalDiffusionAgentReal):
 
         # Save data
         np.savez_compressed(
-            self.result_path, 
+            self.result_path,
             actions=np.array(actions),
             robot_states=np.array(robot_states),
             cond_states=np.array(cond_states),

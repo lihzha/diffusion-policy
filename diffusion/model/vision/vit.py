@@ -1,5 +1,5 @@
 """
-ViT image encoder implementation from IBRL, https://github.com/hengyuan-hu/ibrl
+Custom ViT image encoder implementation from IBRL, https://github.com/hengyuan-hu/ibrl
 
 """
 
@@ -193,7 +193,11 @@ class MultiViewPatchEmbed(nn.Module):
         }
         y = self.forward(x)
         if self.use_large_patch:
-            assert y.size() == (2, self.num_patch, self.embed_dim), y.size()
+            assert y.size() == (
+                2,
+                self.num_patch,
+                self.embed_dim,
+            ), f"{y.size()}, {(2, self.num_patch, self.embed_dim)}"
         else:
             assert y.size() == (
                 2 * self.img_cond_steps * self.num_views,

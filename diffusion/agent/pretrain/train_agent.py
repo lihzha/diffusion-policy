@@ -27,7 +27,7 @@ def to_device(x, device=DEVICE):
     elif type(x) is dict:
         return {k: to_device(v, device) for k, v in x.items()}
     else:
-        print(f"Unrecognized type in `to_device`: {type(x)}")
+        log.error(f"Unrecognized type in `to_device`: {type(x)}")
 
 
 def batch_to_device(batch, device="cuda"):
@@ -63,15 +63,20 @@ class PreTrainAgent:
 
     def __init__(self, cfg):
         super().__init__()
+        self.cfg = cfg
+
+        # set seed
         self.seed = cfg.get("seed", 42)
         random.seed(self.seed)
         np.random.seed(self.seed)
         torch.manual_seed(self.seed)
 
+        # devices
         self.num_gpus = torch.cuda.device_count()
         self.gpu_id = int(cfg.gpu_id)
-
-        self.cfg = cfg
+        self.debug = cfg.get("debug", False)
+        if self.debug and self.gpu_id == 0:
+            torch.cuda.memory._record_memory_history(max_entries=100000)
 
         # Wandb
         self.use_wandb = cfg.get("wandb", None)
@@ -83,18 +88,14 @@ class PreTrainAgent:
                 config=OmegaConf.to_container(cfg, resolve=True),
             )
 
-        if cfg.debug:
-            if self.gpu_id == 0:
-                torch.cuda.memory._record_memory_history(max_entries=100000)
-
         # Build model
         if self.num_gpus > 1:
             cfg.model.device = self.gpu_id
         self.model = hydra.utils.instantiate(cfg.model)
 
         if self.num_gpus > 1:
-            print(f"Using {self.num_gpus} GPUs.")
-            print(self.gpu_id)
+            log.info(f"Using {self.num_gpus} GPUs.")
+            log.info(f"GPU for the current process: {self.gpu_id}")
             from torch.utils.data.distributed import DistributedSampler
             from torch.nn.parallel import DistributedDataParallel as DDP
 
@@ -109,11 +110,12 @@ class PreTrainAgent:
             self.device = torch.device(cfg.device)
             self.ema = EMA(cfg.ema)
             self.ema_model = deepcopy(self.model)
-
-        print(self.ema_model.device)
+        log.info(f"Device for EMA model: {self.ema_model.device}")
         if torch.cuda.is_available():
             allocated_memory = torch.cuda.memory_allocated()
-            print(f"Allocated GPU memory after loading model: {allocated_memory/1024/1024/1024} GB")
+            log.info(
+                f"Allocated GPU memory after loading model: {allocated_memory/1024/1024/1024} GB"
+            )
         GPUtil.showUtilization(all=True)
 
         # Training params
@@ -134,11 +136,10 @@ class PreTrainAgent:
 
         # Build dataset
         self.dataset_train = hydra.utils.instantiate(cfg.train_dataset)
-        
 
         if torch.cuda.is_available():
             allocated_memory = torch.cuda.memory_allocated()
-            print(
+            log.info(
                 f"Allocated GPU memory after loading dataset: {allocated_memory/1024/1024/1024} GB"
             )
         GPUtil.showUtilization(all=True, useOldCode=False)

@@ -33,6 +33,7 @@ class StitchedSequenceDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         dataset_path,
+        normalization_stats_path=None,
         horizon_steps=64,
         cond_steps=1,
         img_cond_steps=1,
@@ -52,7 +53,7 @@ class StitchedSequenceDataset(torch.utils.data.Dataset):
         self.use_img = use_img
         self.max_n_episodes = max_n_episodes
         self.dataset_path = dataset_path
-        self.use_delta_actions = use_delta_actions
+        self.store_gpu = store_gpu
 
         # Load dataset to device specified
         if dataset_path.endswith(".npz"):
@@ -60,116 +61,123 @@ class StitchedSequenceDataset(torch.utils.data.Dataset):
             images = dataset["images"]
             if images.dtype == np.dtype("O"):
                 images = images.item()
-                if len(images.keys()) > 1:
-                    self.use_multi_images = True
-                elif len(images.keys()) == 1:
-                    self.use_multi_images = False
-                else:
-                    raise ValueError("No images found in the dataset")
             else:
-                self.use_multi_images = False
+                raise NotImplementedError("Only support dict of images for now")
         elif dataset_path.endswith(".pkl"):
             with open(dataset_path, "rb") as f:
                 dataset = pickle.load(f)
         else:
             raise ValueError(f"Unsupported file format: {dataset_path}")
 
+        # Use first max_n_episodes episodes
         traj_lengths = dataset["traj_lengths"][:max_n_episodes]  # 1-D array
         total_num_steps = np.sum(traj_lengths)
 
         # Set up indices for sampling
         self.indices = self.make_indices(traj_lengths, horizon_steps, self.cond_steps)
 
+        # Load states and actions
+        self.states = dataset["states"][:total_num_steps].astype(np.float32)
+        self.actions = dataset["actions"][:total_num_steps].astype(np.float32)
         if store_gpu:
-            # Extract states and actions up to max_n_episodes
-            self.states = (
-                torch.from_numpy(dataset["states"][:total_num_steps]).float().to(device)
-            )  # (total_num_steps, obs_dim)
-            self.actions = (
-                torch.from_numpy(dataset["actions"][:total_num_steps])
-                .float()
-                .to(device)
-            )  # (total_num_steps, action_dim)
-        else:
-            self.states = dataset["states"][:total_num_steps].astype(np.float32)
-            self.actions = dataset["actions"][:total_num_steps].astype(np.float32)
+            self.states = torch.from_numpy(self.states, dtype=torch.float32).to(device)
+            self.actions = torch.from_numpy(self.actions, dtype=torch.float32).to(
+                device
+            )
         log.info(f"Loaded dataset from {dataset_path}")
         log.info(f"Number of episodes: {min(max_n_episodes, len(traj_lengths))}")
         log.info(f"States shape/type: {self.states.shape, self.states.dtype}")
         log.info(f"Actions shape/type: {self.actions.shape, self.actions.dtype}")
 
+        # Load images
         if self.use_img:
-            if not self.use_multi_images:
+            self.images = {}
+            for idx in images.keys():
+                self.images[idx] = images[idx][:total_num_steps]
                 if store_gpu:
-                    self.images = torch.from_numpy(
-                        dataset["images"][:total_num_steps]
-                    ).to(
-                        device
-                    )  # (total_num_steps, C, H, W)
-                else:
-                    self.images = dataset["images"][:total_num_steps]
-                log.info(f"Images shape/type: {self.images.shape, self.images.dtype}")
-            else:
-                self.images = {}
-                for idx in images.keys():
-                    if store_gpu:
-                        self.images[idx] = torch.from_numpy(
-                            images[idx][:total_num_steps]
-                        ).to(device)
-                    else:
-                        self.images[idx] = images[idx][:total_num_steps]
-                log.info(f"Loading multiple images from {len(self.images)} cameras")
-                log.info(
-                    f"Images shape/type: {self.images[idx].shape, self.images[idx].dtype}"
-                )
+                    self.images[idx] = torch.from_numpy(self.images[idx]).to(device)
+            log.info(f"Loading multiple images from {len(self.images)} cameras")
+            log.info(
+                f"Images shape/type: {self.images[idx].shape, self.images[idx].dtype}"
+            )
 
-        self.store_gpu = store_gpu
+        # Delta actions --- action chunk relative to current state
+        self.use_delta_actions = use_delta_actions
+        if self.use_delta_actions:
+            normalization = np.load(normalization_stats_path)
+            self.delta_min = normalization["delta_min"].astype(np.float32)
+            self.delta_max = normalization["delta_max"].astype(np.float32)
+            self.raw_states = dataset["raw_states"][:total_num_steps].astype(np.float32)
+            self.raw_actions = dataset["raw_actions"][:total_num_steps].astype(
+                np.float32
+            )
+            if store_gpu:
+                self.delta_min = torch.from_numpy(
+                    self.delta_min, dtype=torch.float32
+                ).to(device)
+                self.delta_max = torch.from_numpy(
+                    self.delta_max, dtype=torch.float32
+                ).to(device)
+                self.raw_states = torch.from_numpy(
+                    self.raw_states, dtype=torch.float32
+                ).to(device)
+                self.raw_actions = torch.from_numpy(
+                    self.raw_actions, dtype=torch.float32
+                ).to(device)
 
     def __getitem__(self, idx):
         """
         repeat states/images if using history observation at the beginning of the episode
         """
+        stack_pkg = torch if self.store_gpu else np
+
+        # extract states and actions
         start, num_before_start = self.indices[idx]
         end = start + self.horizon_steps
         states = self.states[(start - num_before_start) : (start + 1)]
-        if self.store_gpu:
-            actions = self.actions[start:end].clone()
-        else:
-            actions = self.actions[start:end].copy()
-        if self.use_delta_actions:
-            actions[1:] = actions[1:] - actions[0]
-
-        stack_pkg = torch if self.store_gpu else np
-
         states = stack_pkg.stack(
             [
                 states[max(num_before_start - t, 0)]
                 for t in reversed(range(self.cond_steps))
             ]
         )  # more recent is at the end
-
         conditions = {"state": states}
-
         if self.use_img:
-            if not self.use_multi_images:
-                images = self.images[(start - num_before_start) : end]
-                images = stack_pkg.stack(
+            images = {}
+            for idx in self.images.keys():
+                images[idx] = self.images[idx][(start - num_before_start) : end]
+                images[idx] = stack_pkg.stack(
                     [
-                        images[max(num_before_start - t, 0)]
+                        images[idx][max(num_before_start - t, 0)]
                         for t in reversed(range(self.img_cond_steps))
                     ]
                 )
-            else:
-                images = {}
-                for idx in self.images.keys():
-                    images[idx] = self.images[idx][(start - num_before_start) : end]
-                    images[idx] = stack_pkg.stack(
-                        [
-                            images[idx][max(num_before_start - t, 0)]
-                            for t in reversed(range(self.img_cond_steps))
-                        ]
-                    )
             conditions["rgb"] = images
+
+        # extract actions
+        # TODO: assume absolute action right now, and both state and action use joint or cartesian
+        if self.use_delta_actions:  # subtrct current state
+            if self.store_gpu:
+                raw_action = self.raw_actions[start:end][
+                    :, :-1
+                ].clone()  # skip the gripper
+            else:
+                raw_action = self.raw_actions[start:end][:, :-1].copy()
+            raw_cur_state = self.raw_states[start : (start + 1), : raw_action.shape[1]]
+            raw_action -= raw_cur_state
+            action = (
+                2
+                * (raw_action - self.delta_min)
+                / (self.delta_max - self.delta_min + 1e-6)
+                - 1
+            )
+            gripper_action = self.actions[start:end, -1:]  # normalized
+            if self.store_gpu:
+                actions = torch.cat([action, gripper_action], dim=-1)
+            else:
+                actions = np.concatenate([action, gripper_action], axis=-1)
+        else:
+            actions = self.actions[start:end]  # normalized absolute actions
         batch = Batch(actions, conditions)
         return batch
 
