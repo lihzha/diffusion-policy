@@ -3,11 +3,12 @@ Custom ViT image encoder implementation from IBRL, https://github.com/hengyuan-h
 
 """
 
+import math
+
 import einops
 import torch
 from torch import nn
 from torch.nn.init import trunc_normal_
-import math
 
 
 class VitEncoder(nn.Module):

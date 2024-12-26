@@ -1,16 +1,16 @@
+from typing import Union
+
 import mplib
 import numpy as np
 import sapien
+import torch
 import trimesh
-
 from mani_skill.agents.base_agent import BaseAgent
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.envs.scene import ManiSkillScene
 from mani_skill.utils.structs.pose import to_sapien_pose
-from mani_skill.sensors.camera import CameraConfig
-import sapien.physx as physx
-from typing import Union
-import torch
+from transforms3d import quaternions
+
 OPEN = 1
 CLOSED = -1
 
@@ -22,12 +22,12 @@ class PandaArmMotionPlanningSolver:
         obs,
         debug: bool = False,
         vis: bool = True,
-        base_pose: sapien.Pose = sapien.Pose(p=(0,0,0)),  # TODO mplib doesn't support robot base being anywhere but 0
+        base_pose: sapien.Pose = None,  # TODO mplib doesn't support robot base being anywhere but 0
         visualize_target_grasp_pose: bool = True,
         print_env_info: bool = True,
         joint_vel_limits=0.9,
         joint_acc_limits=0.9,
-        render_mode='human'
+        render_mode="human",
     ):
         self.env = env
         self.base_env: BaseEnv = env.unwrapped
@@ -39,7 +39,9 @@ class PandaArmMotionPlanningSolver:
 
         self.base_pose = to_sapien_pose(base_pose)
 
-        self.use_point_cloud = False
+        self.base_pose = to_sapien_pose(
+            base_pose if base_pose is not None else sapien.Pose(p=(0, 0, 0))
+        )
         self.collision_pts_changed = False
         self.all_collision_pts = None
 
@@ -62,7 +64,6 @@ class PandaArmMotionPlanningSolver:
             self.grasp_pose_visual.set_pose(self.base_env.agent.tcp.pose)
         self.elapsed_steps = 0
 
-        
     # def add_env_collision_pts(self):
     #     self.base_env.
 
@@ -78,7 +79,7 @@ class PandaArmMotionPlanningSolver:
     #         point_cloud = self.get_point_cloud_from_entity(actor)
     #         point_clouds.append(point_cloud)
     #     return point_clouds
-                    
+
     # @staticmethod
     # def get_point_cloud_from_entity(entity):
     #     """
@@ -100,12 +101,11 @@ class PandaArmMotionPlanningSolver:
     #                 # Convert vertices to world coordinates
     #                 world_vertices = [pose.to_transformation_matrix() @ np.append(v, 1)[:3] for v in vertices]
     #                 point_cloud.extend(world_vertices)
-        
+
     #     return np.array(point_cloud)
 
-
     def render_wait(self):
-        if self.render_mode == 'human':
+        if self.render_mode == "human":
             if not self.vis or not self.debug:
                 return
             print("Press [c] to continue")
@@ -131,14 +131,6 @@ class PandaArmMotionPlanningSolver:
         )
         self.planner.set_base_pose(np.hstack([self.base_pose.p, self.base_pose.q]))
         xyz = obs["pointcloud"]["xyzw"][0, ..., :3].cpu().numpy()
-        colors = obs["pointcloud"]["rgb"][0].cpu().detach().numpy()
-        pcd = trimesh.points.PointCloud(xyz, colors)
-        # view from first camera
-        for uid, config in self.base_env._sensor_configs.items():
-            if isinstance(config, CameraConfig):
-                cam2world = obs["sensor_param"][uid]["cam2world_gl"][0]
-                camera = trimesh.scene.Camera(uid, (1024, 1024), fov=(np.rad2deg(config.fov), np.rad2deg(config.fov)))
-            break
         # trimesh.Scene([pcd], camera=camera, camera_transform=cam2world).show()
         self.add_collision_pts(xyz)
 
@@ -157,15 +149,18 @@ class PandaArmMotionPlanningSolver:
                 print(
                     f"[{self.elapsed_steps:3}] Env Output: reward={reward} info={info}"
                 )
-            if self.vis and self.render_mode == 'human':
+            if self.vis and self.render_mode == "human":
                 self.base_env.render_human()
-            elif self.vis and self.render_mode == 'rgb_array':
+            elif self.vis and self.render_mode == "rgb_array":
                 self.env.render()
         return obs, reward, terminated, truncated, info
 
     def move_to_pose_with_RRTConnect(
-        self, pose: Union[sapien.Pose, np.ndarray, torch.Tensor], dry_run: bool = False, refine_steps: int = 0
-    ):  
+        self,
+        pose: Union[sapien.Pose, np.ndarray, torch.Tensor],
+        dry_run: bool = False,
+        refine_steps: int = 0,
+    ):
         if isinstance(pose, torch.Tensor) or isinstance(pose, np.ndarray):
             pose = sapien.Pose(p=pose[:3], q=pose[3:])
         if self.grasp_pose_visual is not None:
@@ -193,7 +188,7 @@ class PandaArmMotionPlanningSolver:
         # try screw two times before giving up
         if self.grasp_pose_visual is not None:
             self.grasp_pose_visual.set_pose(pose)
-        pose = sapien.Pose(p=pose.p , q=pose.q)
+        pose = sapien.Pose(p=pose.p, q=pose.q)
         result = self.planner.plan_screw(
             np.concatenate([pose.p, pose.q]),
             self.robot.get_qpos().cpu().numpy()[0],
@@ -219,7 +214,7 @@ class PandaArmMotionPlanningSolver:
     def open_gripper(self):
         self.gripper_state = OPEN
         qpos = self.robot.get_qpos()[0, :-2].cpu().numpy()
-        for i in range(6):
+        for _ in range(6):
             if self.control_mode == "pd_joint_pos":
                 action = np.hstack([qpos, self.gripper_state])
             else:
@@ -237,7 +232,7 @@ class PandaArmMotionPlanningSolver:
     def close_gripper(self, t=6):
         self.gripper_state = CLOSED
         qpos = self.robot.get_qpos()[0, :-2].cpu().numpy()
-        for i in range(t):
+        for _ in range(t):
             if self.control_mode == "pd_joint_pos":
                 action = np.hstack([qpos, self.gripper_state])
             else:
@@ -276,8 +271,6 @@ class PandaArmMotionPlanningSolver:
     def close(self):
         pass
 
-from transforms3d import quaternions
-
 
 def build_panda_gripper_grasp_pose_visual(scene: ManiSkillScene):
     builder = scene.create_actor_builder()
@@ -287,7 +280,7 @@ def build_panda_gripper_grasp_pose_visual(scene: ManiSkillScene):
     builder.add_sphere_visual(
         pose=sapien.Pose(p=[0, 0, 0.0]),
         radius=grasp_pose_visual_width,
-        material=sapien.render.RenderMaterial(base_color=[0.3, 0.4, 0.8, 0.7])
+        material=sapien.render.RenderMaterial(base_color=[0.3, 0.4, 0.8, 0.7]),
     )
 
     builder.add_box_visual(

@@ -5,11 +5,12 @@ No normalization is applied here --- we always normalize the data when pre-proce
 
 """
 
-import numpy as np
-import torch
 import logging
 import pickle
 import random
+
+import numpy as np
+import torch
 
 from guided_dc.utils.preprocess_utils import Batch
 

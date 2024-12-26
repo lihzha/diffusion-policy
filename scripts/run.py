@@ -3,19 +3,17 @@ Launcher for all experiments. Download pre-training data, normalization statisti
 
 """
 
-import os
-import sys
-
 # import pretty_errors
 import logging
-
 import math
-import hydra
-from omegaconf import OmegaConf
-
-import torch
+import os
 import signal
+import sys
+
+import hydra
+import torch
 import torch.distributed as dist
+from omegaconf import OmegaConf
 
 # allows arbitrary python code execution in configs using the ${eval:''} resolver
 OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -53,7 +51,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 def _main(cfg: OmegaConf):
     num_gpus = torch.cuda.device_count()
     if num_gpus > 1:
-        from torch.distributed import init_process_group, destroy_process_group
+        from torch.distributed import destroy_process_group, init_process_group
 
         def ddp_setup():
             # os.environ["MASTER_ADDR"] = os.environ["SLURM_NODELIST"].split(",")[0]
@@ -86,7 +84,6 @@ def _main(cfg: OmegaConf):
     config_name="diffusion_unet.yaml",
 )
 def main(cfg: OmegaConf):
-
     # # Launch training in multiple processes if needed
     # if torch.cuda.device_count() > 1:
     #     import torch.multiprocessing as mp

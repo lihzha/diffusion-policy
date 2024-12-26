@@ -1,57 +1,93 @@
-import random
-import torch
+import logging
+
 import numpy as np
 
-def randomize_continuous(min, max, size: int, return_list=False):
-    '''
-    Return a list with length 'size', with each element's value within the interval [min, max].
-    '''
-    if size > 1:
-        return [random.uniform(min, max) for _ in range(size)]
-    else:
-        if return_list:
-            return [random.uniform(min, max)]
-        else:
-            return random.uniform(min, max)
+log = logging.getLogger(__name__)
 
-def randomize_by_percentage(array, low_percentage=0.9, high_percentage=1.1):
+
+def randomize(value_range, operation, distribution, base=None):
+    assert distribution in ["uniform", "normal"]
+    if operation == "additive":
+        return randomize_additive(base, value_range, distribution)
+    elif operation == "absolute":
+        return randomize_absolute(value_range, distribution)
+    elif operation == "scaling":
+        return randomize_scaling(base, value_range, distribution)
+    else:
+        raise ValueError("Invalid operation: {}".format(operation))
+
+
+def randomize_array(value_range, operation, distribution, base=None):
+    # assert isinstance(value_range, (list, list)), "value_range must be a list of lists."
+    if base is not None:
+        return [
+            randomize(r, operation, distribution, b)
+            for r, b in zip(value_range, base, strict=False)
+        ]
+    else:
+        return [randomize(r, operation, distribution, base=None) for r in value_range]
+
+
+def randomize_additive(base, value_range, distribution="uniform"):
     """
-    Randomizes elements of the input array/tensor by multiplying them with
-    a random factor between (low_percentage) and (high_percentage).
-    
+    Randomizes a value by adding a random value within the specified value_range.
+
     Parameters:
-    - array: A numpy array, torch tensor, or list containing the values to be randomized.
-    - low_percentage: The lower bound of the percentage change (e.g., -0.1 for -10%).
-    - high_percentage: The upper bound of the percentage change (e.g., 1.1 for +110%).
-    
+    - value_range (tuple): The range of the randomization.
+    - distribution (str): The distribution of the randomization.
+
     Returns:
-    - randomized_array: An array/tensor/list of the same shape with randomized values.
+    - float: The randomized value.
     """
-    
-    # Check if the input is a torch tensor
-    if isinstance(array, torch.Tensor):
-        device = array.device  # Store the device (e.g., GPU or CPU)
-        # Generate random factors on the same device as the input tensor
-        random_factors = torch.empty_like(array).uniform_(low_percentage, high_percentage).to(device)
-        randomized_array = array * random_factors
-        
-    # Check if the input is a numpy array
-    elif isinstance(array, np.ndarray):
-        # Generate random factors as a numpy array
-        random_factors = np.random.uniform(low_percentage, high_percentage, size=array.shape)
-        randomized_array = array * random_factors
-    
-    # If it's a list, process as numpy array without conversion
-    elif isinstance(array, list):
-        array = np.array(array)
-        random_factors = np.random.uniform(low_percentage, high_percentage, size=array.shape)
-        randomized_array = array * random_factors
-    
-    elif isinstance(array, float):
-        random_factors = np.random.uniform(low_percentage, high_percentage, size=1).item()
-        randomized_array = array * random_factors
-    
-    return randomized_array
+    if base is None:
+        base = 0.0
+        # log.warning("Base value is not provided. Defaulting to 0.")
+
+    if distribution == "uniform":
+        return base + np.random.uniform(value_range[0], value_range[1])
+    elif distribution == "normal":
+        return base + np.random.normal(value_range[0], value_range[1])
+
+
+def randomize_absolute(value_range, distribution="uniform"):
+    """
+    Randomizes a value within the specified value_range.
+
+    Parameters:
+    - value_range (tuple): The range of the randomization.
+    - distribution (str): The distribution of the randomization.
+
+    Returns:
+    - float: The randomized value.
+    """
+
+    if distribution == "uniform":
+        return np.random.uniform(value_range[0], value_range[1])
+    elif distribution == "normal":
+        return np.random.normal(value_range[0], value_range[1])
+
+
+def randomize_scaling(base, value_range, distribution="uniform"):
+    """
+    Randomizes a value by scaling it by a random value within the specified value_range.
+
+    Parameters:
+    - base (float): The base value to be randomized.
+    - value_range (tuple): The range of the randomization.
+    - distribution (str): The distribution of the randomization.
+
+    Returns:
+    - float: The randomized value.
+    """
+    if base is None:
+        base = 1.0
+        # log.warning("Base value is not provided. Defaulting to 1.")
+
+    if distribution == "uniform":
+        return base * np.random.uniform(value_range[0], value_range[1])
+    elif distribution == "normal":
+        return base * np.random.normal(value_range[0], value_range[1])
+
 
 def randomize_uv(top_uv, aspect_ratio, shift_range=0.1):
     """
@@ -83,6 +119,8 @@ def randomize_uv(top_uv, aspect_ratio, shift_range=0.1):
     # Shift the UV coordinates
     randomized_uv = top_uv - uv_min
     randomized_uv = randomized_uv / step_size
-    randomized_uv = (randomized_uv + random_shift) % 1.0  # Wrap around the texture space
+    randomized_uv = (
+        randomized_uv + random_shift
+    ) % 1.0  # Wrap around the texture space
 
     return randomized_uv

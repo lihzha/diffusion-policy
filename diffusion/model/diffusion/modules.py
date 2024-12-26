@@ -6,13 +6,13 @@ For MLP and UNet diffusion models.
 """
 
 import math
+
 import torch
 import torch.nn as nn
 from einops.layers.torch import Rearrange
 
 
 class SinusoidalPosEmb(nn.Module):
-
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -28,7 +28,6 @@ class SinusoidalPosEmb(nn.Module):
 
 
 class Downsample1d(nn.Module):
-
     def __init__(self, dim):
         super().__init__()
         self.conv = nn.Conv1d(dim, dim, 3, 2, 1)
@@ -38,7 +37,6 @@ class Downsample1d(nn.Module):
 
 
 class Upsample1d(nn.Module):
-
     def __init__(self, dim):
         super().__init__()
         self.conv = nn.ConvTranspose1d(dim, dim, 4, 2, 1)
@@ -67,7 +65,7 @@ class Conv1dBlock(nn.Module):
         elif activation_type == "ReLU":
             act = nn.ReLU()
         else:
-            raise "Unknown activation type for Conv1dBlock"
+            raise ValueError("Unknown activation type for Conv1dBlock")
 
         self.block = nn.Sequential(
             nn.Conv1d(

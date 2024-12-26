@@ -3,9 +3,10 @@ MLP models for diffusion policies.
 
 """
 
+import logging
+
 import torch
 import torch.nn as nn
-import logging
 
 from diffusion.model.common.mlp import MLP, ResidualMLP
 from diffusion.model.diffusion.modules import SinusoidalPosEmb
@@ -51,7 +52,7 @@ class VisionDiffusionMLP(nn.Module):
         else:
             model = MLP
         self.mlp_mean = model(
-            [input_dim] + mlp_dims + [output_dim],
+            [input_dim, *mlp_dims, output_dim],
             activation_type=activation_type,
             out_activation_type=out_activation_type,
             use_layernorm=use_layernorm,
@@ -97,7 +98,6 @@ class VisionDiffusionMLP(nn.Module):
 
 
 class DiffusionMLP(nn.Module):
-
     def __init__(
         self,
         action_dim,
@@ -125,7 +125,7 @@ class DiffusionMLP(nn.Module):
             model = MLP
         if cond_mlp_dims is not None:
             self.cond_mlp = MLP(
-                [cond_dim] + cond_mlp_dims,
+                [cond_dim, *cond_mlp_dims],
                 activation_type=activation_type,
                 out_activation_type="Identity",
             )
@@ -133,7 +133,7 @@ class DiffusionMLP(nn.Module):
         else:
             input_dim = time_dim + action_dim * horizon_steps + cond_dim
         self.mlp_mean = model(
-            [input_dim] + mlp_dims + [output_dim],
+            [input_dim, *mlp_dims, output_dim],
             activation_type=activation_type,
             out_activation_type=out_activation_type,
             use_layernorm=use_layernorm,

@@ -3,35 +3,34 @@ Parent pre-training agent class.
 
 """
 
+import logging
 import os
 import random
-import numpy as np
-from omegaconf import OmegaConf
-import torch
-import hydra
-import logging
-import wandb
 from copy import deepcopy
 
+import GPUtil
+import hydra
+import numpy as np
+import torch
+from omegaconf import OmegaConf
+
+import wandb
 from guided_dc.utils.scheduler import CosineAnnealingWarmupRestarts
 
 log = logging.getLogger(__name__)
-import GPUtil
-
 DEVICE = "cuda"
 
 
 def to_device(x, device=DEVICE):
     if torch.is_tensor(x):
         return x.to(device)
-    elif type(x) is dict:
+    elif isinstance(x, dict):
         return {k: to_device(v, device) for k, v in x.items()}
     else:
         log.error(f"Unrecognized type in `to_device`: {type(x)}")
 
 
 def batch_to_device(batch, device="cuda"):
-
     vals = [to_device(getattr(batch, field), device) for field in batch._fields]
     return type(batch)(*vals)
 
@@ -60,7 +59,6 @@ class EMA:
 
 
 class PreTrainAgent:
-
     def __init__(self, cfg):
         super().__init__()
         self.cfg = cfg
@@ -96,11 +94,16 @@ class PreTrainAgent:
         if self.num_gpus > 1:
             log.info(f"Using {self.num_gpus} GPUs.")
             log.info(f"GPU for the current process: {self.gpu_id}")
-            from torch.utils.data.distributed import DistributedSampler
             from torch.nn.parallel import DistributedDataParallel as DDP
+            from torch.utils.data.distributed import DistributedSampler
 
             self.model = self.model.to(self.gpu_id)
-            self.model = DDP(self.model, device_ids=[self.gpu_id])
+            self.model = DDP(
+                self.model,
+                device_ids=[self.gpu_id],
+                gradient_as_bucket_view=True,
+                static_graph=True,
+            )
             self.device = torch.device(f"cuda:{self.gpu_id}")
             self.ema = EMA(cfg.ema)
             self.ema_model = deepcopy(self.model.module)
@@ -163,8 +166,8 @@ class PreTrainAgent:
                     pin_memory=False,
                     sampler=DistributedSampler(self.dataset_train),
                 )
-                log.info(f"Using distributed sampler")
-            log.info(f"Using GPU memory for dataset")
+                log.info("Using distributed sampler")
+            log.info("Using GPU memory for dataset")
         else:
             if self.num_gpus == 1:
                 self.dataloader_train = torch.utils.data.DataLoader(
@@ -185,8 +188,8 @@ class PreTrainAgent:
                     persistent_workers=cfg.train.get("persistent_workers", False),
                     sampler=DistributedSampler(self.dataset_train),
                 )
-                log.info(f"Using distributed sampler")
-            log.info(f"Using CPU memory for dataset")
+                log.info("Using distributed sampler")
+            log.info("Using CPU memory for dataset")
 
         self.dataloader_val = None
         if "train_split" in cfg.train and cfg.train.train_split < 1:

@@ -1,7 +1,8 @@
+from typing import Callable
+
+import timm
 import torch
 from torch import nn
-import timm
-from typing import Callable
 
 
 def replace_submodules(
@@ -57,7 +58,6 @@ class TimmEncoder(nn.Module):
         img_size=(3, 96, 96),
         drop_path_rate=0.0,
     ):
-
         super().__init__()
 
         self.img_cond_steps = img_cond_steps

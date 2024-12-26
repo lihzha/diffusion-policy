@@ -3,7 +3,7 @@ defaults:
 hydra:
   run:
     dir: ${logdir}
-_target_: diffusion.agent.pretrain.train_diffusion_agent.TrainDiffusionAgent
+_target_: diffusion.agent.pretrain.train_il_agent.TrainILAgent
 
 job_id: 0
 gpu_id: 0
@@ -129,14 +129,14 @@ model:
           crop_height_pct: 0.92   # for vit, should ensure the crop size is multiple of patch size
           crop_width_pct: 0.92
           num_crops: 1
-          pos_enc: false 
-        
+          pos_enc: false
+
         # - _target_: diffusion.model.vision.modules.ColorJitter
         #   brightness: 0.3
         #   contrast: 0.4
         #   saturation: 0.5
         #   hue: 0.08
-        
+
         - _target_: diffusion.model.vision.modules.Normalize
 
 ema:

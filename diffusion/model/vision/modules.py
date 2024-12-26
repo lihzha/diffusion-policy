@@ -5,9 +5,10 @@ Additional implementation of the ViT image encoder from https://github.com/hengy
 
 import torch
 import torch.nn as nn
-import torchvision.transforms.functional as ttf
-import guided_dc.utils.tensor_util as tu
 import torchvision
+import torchvision.transforms.functional as ttf
+
+import guided_dc.utils.tensor_util as tu
 
 
 class SpatialEmb(nn.Module):
@@ -124,6 +125,7 @@ class CropRandomizer(nn.Module):
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
                 Some modules may not need this argument, if their output does not depend
+                Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
         Returns:
@@ -144,6 +146,7 @@ class CropRandomizer(nn.Module):
 
         Args:
             input_shape (iterable of int): shape of input. Does not include batch dimension.
+                Some modules may not need this argument, if their output does not depend
                 Some modules may not need this argument, if their output does not depend
                 on the size of the input, or if they assume fixed size input.
 
@@ -178,7 +181,16 @@ class CropRandomizer(nn.Module):
             out = ttf.center_crop(
                 img=inputs, output_size=(self.crop_height, self.crop_width)
             )
+            out = ttf.center_crop(
+                img=inputs, output_size=(self.crop_height, self.crop_width)
+            )
             if self.num_crops > 1:
+                B, C, H, W = out.shape
+                out = (
+                    out.unsqueeze(1)
+                    .expand(B, self.num_crops, C, H, W)
+                    .reshape(-1, C, H, W)
+                )
                 B, C, H, W = out.shape
                 out = (
                     out.unsqueeze(1)
@@ -197,6 +209,13 @@ class CropRandomizer(nn.Module):
         if self.num_crops <= 1:
             return inputs
         else:
+            batch_size = inputs.shape[0] // self.num_crops
+            out = tu.reshape_dimensions(
+                inputs,
+                begin_axis=0,
+                end_axis=0,
+                target_dims=(batch_size, self.num_crops),
+            )
             batch_size = inputs.shape[0] // self.num_crops
             out = tu.reshape_dimensions(
                 inputs,
@@ -225,6 +244,7 @@ def crop_image_from_indices(
     crop_width,
 ):
     """
+    Crops images at the locations specified by @crop_indices. Crops will be
     Crops images at the locations specified by @crop_indices. Crops will be
     taken across all channels.
 
@@ -256,6 +276,9 @@ def crop_image_from_indices(
     assert (ndim_im_shape == ndim_indices_shape + 1) or (
         ndim_im_shape == ndim_indices_shape + 2
     )
+    assert (ndim_im_shape == ndim_indices_shape + 1) or (
+        ndim_im_shape == ndim_indices_shape + 2
+    )
 
     # maybe pad so that @crop_indices is shape [..., N, 2]
     is_padded = False
@@ -271,8 +294,6 @@ def crop_image_from_indices(
     num_crops = crop_indices.shape[-2]
 
     # make sure @crop_indices are in valid range
-    assert (crop_indices[..., 0] >= 0).all().item()
-    assert (crop_indices[..., 0] < (image_h - crop_height)).all().item()
     assert (crop_indices[..., 1] >= 0).all().item()
     assert (crop_indices[..., 1] < (image_w - crop_width)).all().item()
 
@@ -288,6 +309,9 @@ def crop_image_from_indices(
     crop_in_grid = torch.cat(
         (crop_ind_grid_h.unsqueeze(-1), crop_ind_grid_w.unsqueeze(-1)), dim=-1
     )
+    crop_in_grid = torch.cat(
+        (crop_ind_grid_h.unsqueeze(-1), crop_ind_grid_w.unsqueeze(-1)), dim=-1
+    )
 
     # Add above grid with the offset index of each sampled crop to get 2d indices for each crop.
     # After broadcasting, this will be shape [..., N, CH, CW, 2] and each crop has a [CH, CW, 2]
@@ -296,10 +320,23 @@ def crop_image_from_indices(
     all_crop_inds = crop_indices.unsqueeze(-2).unsqueeze(-2) + crop_in_grid.reshape(
         grid_reshape
     )
+    all_crop_inds = crop_indices.unsqueeze(-2).unsqueeze(-2) + crop_in_grid.reshape(
+        grid_reshape
+    )
 
     # For using @torch.gather, convert to flat indices from 2D indices, and also
     # repeat across the channel dimension. To get flat index of each pixel to grab for
+    # repeat across the channel dimension. To get flat index of each pixel to grab for
     # each sampled crop, we just use the mapping: ind = h_ind * @image_w + w_ind
+    all_crop_inds = (
+        all_crop_inds[..., 0] * image_w + all_crop_inds[..., 1]
+    )  # shape [..., N, CH, CW]
+    all_crop_inds = tu.unsqueeze_expand_at(
+        all_crop_inds, size=image_c, dim=-3
+    )  # shape [..., N, C, CH, CW]
+    all_crop_inds = tu.flatten(
+        all_crop_inds, begin_axis=-2
+    )  # shape [..., N, C, CH * CW]
     all_crop_inds = (
         all_crop_inds[..., 0] * image_w + all_crop_inds[..., 1]
     )  # shape [..., N, CH, CW]
@@ -316,6 +353,12 @@ def crop_image_from_indices(
     crops = torch.gather(images_to_crop, dim=-1, index=all_crop_inds)
     # [..., N, C, CH * CW] -> [..., N, C, CH, CW]
     reshape_axis = len(crops.shape) - 1
+    crops = tu.reshape_dimensions(
+        crops,
+        begin_axis=reshape_axis,
+        end_axis=reshape_axis,
+        target_dims=(crop_height, crop_width),
+    )
     crops = tu.reshape_dimensions(
         crops,
         begin_axis=reshape_axis,
@@ -345,16 +388,20 @@ def sample_random_image_crops(
 
         crop_height (int): height of crop to take
 
+
         crop_width (int): width of crop to take
 
         num_crops (n): number of crops to sample
 
         pos_enc (bool): if True, also add 2 channels to the outputs that gives a spatial
+        pos_enc (bool): if True, also add 2 channels to the outputs that gives a spatial
             encoding of the original source pixel locations. This means that the
+            output crops will contain information about where in the source image
             output crops will contain information about where in the source image
             it was sampled from.
 
     Returns:
+        crops (torch.Tensor): crops of shape (..., @num_crops, C, @crop_height, @crop_width)
         crops (torch.Tensor): crops of shape (..., @num_crops, C, @crop_height, @crop_width)
             if @pos_enc is False, otherwise (..., @num_crops, C + 2, @crop_height, @crop_width)
 
@@ -370,6 +417,7 @@ def sample_random_image_crops(
         pos_y, pos_x = torch.meshgrid(torch.arange(h), torch.arange(w))
         pos_y = pos_y.float().to(device) / float(h)
         pos_x = pos_x.float().to(device) / float(w)
+        position_enc = torch.stack((pos_y, pos_x))  # shape [C, H, W]
         position_enc = torch.stack((pos_y, pos_x))  # shape [C, H, W]
 
         # unsqueeze and expand to match leading dimensions -> shape [..., C, H, W]
@@ -387,10 +435,20 @@ def sample_random_image_crops(
 
     # Sample crop locations for all tensor dimensions up to the last 3, which are [C, H, W].
     # Each gets @num_crops samples - typically this will just be the batch dimension (B), so
+    # Each gets @num_crops samples - typically this will just be the batch dimension (B), so
     # we will sample [B, N] indices, but this supports having more than one leading dimension,
     # or possibly no leading dimension.
     #
     # Trick: sample in [0, 1) with rand, then re-scale to [0, M) and convert to long to get sampled ints
+    crop_inds_h = (
+        max_sample_h * torch.rand(*source_im.shape[:-3], num_crops).to(device)
+    ).long()
+    crop_inds_w = (
+        max_sample_w * torch.rand(*source_im.shape[:-3], num_crops).to(device)
+    ).long()
+    crop_inds = torch.cat(
+        (crop_inds_h.unsqueeze(-1), crop_inds_w.unsqueeze(-1)), dim=-1
+    )  # shape [..., N, 2]
     crop_inds_h = (
         max_sample_h * torch.rand(*source_im.shape[:-3], num_crops).to(device)
     ).long()
@@ -412,17 +470,39 @@ def sample_random_image_crops(
 
 
 class ColorJitter(nn.Module):
-    def __init__(self, brightness=0.3, contrast=0.4, saturation=0.5, hue=0.1):
+    def __init__(self, brightness=0.3, contrast=0.4, saturation=0.5, hue=0.12, p=0.8):
         super().__init__()
         self.color_jitter = torchvision.transforms.ColorJitter(
             brightness=brightness, contrast=contrast, saturation=saturation, hue=hue
         )
+        self.p = p
 
     def forward(self, x):
         if self.training:
-            return self.color_jitter(x)
-        else:
-            return x
+            if torch.rand(1) < self.p:
+                x = x / 255.0
+                x = self.color_jitter(x)
+                x = x * 255.0
+                return x
+        return x
+
+
+class GaussianBlur(nn.Module):
+    def __init__(self, kernel_size=9, sigma=(0.1, 2.0), p=0.8):
+        super().__init__()
+        self.t = torchvision.transforms.GaussianBlur(
+            kernel_size=kernel_size, sigma=sigma
+        )
+        self.p = p
+
+    def forward(self, x):
+        if self.training:
+            if torch.rand(1) < self.p:
+                x = x / 255.0
+                x = self.t(x)
+                x = x * 255.0
+                return x
+        return x
 
 
 class Resize(nn.Module):
@@ -436,7 +516,8 @@ class Resize(nn.Module):
         if x.size()[-3:] == self.size:
             return x
         else:
-            return self.resize(x)
+            x = self.resize(x)
+            return x
 
 
 class Normalize(nn.Module):
@@ -444,6 +525,7 @@ class Normalize(nn.Module):
         super().__init__()
 
     def forward(self, x):
+        assert x.max() > 5, x.max()
         assert x.max() > 5, x.max()
         x = x / 255.0 - 0.5
         return x
@@ -492,7 +574,30 @@ if __name__ == "__main__":
     # image_aug = Image.fromarray(image_aug.astype(np.uint8))
     # image_aug.save("image_aug4.jpg")
 
-    smb = SpatialEmb(num_patch=113, patch_dim=512, prop_dim=7, proj_dim=43, dropout=0.0)
-    feat = torch.randn(3, 113, 512)
-    state = torch.randn(3, 7)
-    out = smb(feat, state)
+    # smb = SpatialEmb(num_patch=113, patch_dim=512, prop_dim=7, proj_dim=43, dropout=0.0)
+    # feat = torch.randn(3, 113, 512)
+    # state = torch.randn(3, 7)
+    # out = smb(feat, state)
+
+    import cv2
+
+    # Read the image
+    img = cv2.imread(
+        "image_0.png",
+        cv2.IMREAD_UNCHANGED,
+    )
+    img = torch.tensor(img[:, :, :3]).permute(2, 1, 0).float() / 255
+    print(img.shape)
+    cj = ColorJitter(hue=0.03, brightness=0.2, contrast=0.1, saturation=0.1)
+    # cc = CropRandomizer(
+    #     input_shape=(3, 640, 480),
+    #     crop_height_pct=0.8,
+    #     crop_width_pct=0.8,
+    #     num_crops=1,
+    #     pos_enc=False,
+    # )
+    for i in range(10):
+        # cc_img = cc(img)
+        cj_img = cj(img)
+        cj_img = cj_img.squeeze().permute(2, 1, 0).numpy() * 255
+        cv2.imwrite(f"color_jitter_{i}.png", cj_img)

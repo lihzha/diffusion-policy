@@ -3,8 +3,8 @@ From Diffuser https://github.com/jannerm/diffuser
 
 """
 
-import torch
 import numpy as np
+import torch
 
 
 def cosine_beta_schedule(timesteps, s=0.008, dtype=torch.float32):

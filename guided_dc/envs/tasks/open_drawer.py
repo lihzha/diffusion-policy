@@ -15,72 +15,93 @@ in addition to initializing any task relevant data like a goal
 See comments for how to make your own environment and what each required function should do
 """
 
-from typing import Any, Dict, Union, List
-import numpy as np
-import torch
-import sapien
-from transforms3d.euler import euler2quat
-import sapien.physx as physx
-import os
 import copy
+import os
+from typing import Any, ClassVar, Dict, List, Union
+
+import numpy as np
+import sapien
+import sapien.physx as physx
+import torch
 import trimesh
-
 from mani_skill.agents.robots import Panda
-from mani_skill.utils.building import actors
-from mani_skill.utils.registration import register_env
-from mani_skill.utils.structs import Pose
+from mani_skill.utils import common
 from mani_skill.utils.building import actors, articulations
-from mani_skill.utils.structs import Articulation, Link, Pose, Actor
-from mani_skill.utils import common, sapien_utils
 from mani_skill.utils.geometry.geometry import transform_points
+from mani_skill.utils.registration import register_env
+from mani_skill.utils.structs import Articulation, Link, Pose
+from transforms3d.euler import euler2quat
 
-from guided_dc.envs.wrappers.randomized_env import RandEnv
+from guided_dc.envs.randomized_env import RandEnv
 from guided_dc.envs.scenes.tabletop_scene_builder import TabletopSceneBuilder
-from guided_dc.utils.randomization import randomize_continuous, randomize_by_percentage
-from guided_dc.utils.pose_utils import quaternion_multiply, rotate_vectors
 from guided_dc.utils.io_utils import load_json
+from guided_dc.utils.pose_utils import quaternion_multiply, rotate_vectors
+from guided_dc.utils.randomization import randomize_absolute, randomize_scaling
 from guided_dc.utils.traj_utils import interpolate_trajectory
 
 DRAWER_COLLISION_BIT = 29
 
+
 @register_env("Drawer-v1", max_episode_steps=100)
 class Drawer(RandEnv):
-
-    SUPPORTED_ROBOTS = ["panda", "panda_wristcam"]
+    SUPPORTED_ROBOTS: ClassVar[List[str]] = ["panda", "panda_wristcam"]
 
     agent: Union[Panda]
 
     min_open_frac = 0.75
-  
+
     def __init__(self, *args, robot_uids="panda_wristcam", **kwargs):
         # specifying robot_uids="panda" as the default means gym.make("PushCube-v1") will default to using the panda arm.
-        self.init_cfg = kwargs['init']
+        self.init_cfg = kwargs["init"]
         if isinstance(self.init_cfg, dict):
             from omegaconf import OmegaConf
+
             self.init_cfg = OmegaConf.create(self.init_cfg)
         self.robot_init_qpos_noise = self.init_cfg.robot.robot_init_qpos_noise
-        super().__init__(*args, robot_uids=robot_uids, rand_cfg=kwargs.pop('rand'), init_cfg=kwargs.pop('init'), **kwargs)
+        super().__init__(
+            *args,
+            robot_uids=robot_uids,
+            rand_cfg=kwargs.pop("rand"),
+            init_cfg=kwargs.pop("init"),
+            **kwargs,
+        )
 
     def _load_scene(self, options: dict):
         # we use a prebuilt scene builder class that automatically loads in a floor and table.
-        
-        floor_texture_file_path = '/home/irom-lab/projects/guided-data-collection/guided_dc/assets/floor'
-        table_model_file_path = '/home/irom-lab/projects/guided-data-collection/guided_dc/assets/table'
+
+        floor_texture_file_path = "guided_dc/assets/floor/"
+        table_model_file_path = "guided_dc/assets/table/"
         # Get all files in table_model_file_path that ends with .obj
-        all_table_model_files = [f for f in os.listdir(table_model_file_path) if f.endswith('.obj')]
+        all_table_model_files = [
+            f for f in os.listdir(table_model_file_path) if f.endswith(".obj")
+        ]
         # Get all files in floor_texture_file_path that ends with .png or .jpg or .jpeg
-        all_floor_texture_files = [f for f in os.listdir(floor_texture_file_path) if f.endswith('.png') or f.endswith('.jpg') or f.endswith('.jpeg')]
-        
+        all_floor_texture_files = [
+            f
+            for f in os.listdir(floor_texture_file_path)
+            if f.endswith(".png") or f.endswith(".jpg") or f.endswith(".jpeg")
+        ]
+
         # Randomly choose a table model file and a floor texture file from the list of files
-        table_model_file = os.path.join(table_model_file_path, np.random.choice(all_table_model_files))
-        floor_texture_file = os.path.join(floor_texture_file_path, np.random.choice(all_floor_texture_files))
-        
-        self.table_scene = TabletopSceneBuilder(
-            env=self, robot_init_qpos_noise=self.robot_init_qpos_noise, table_model_file=table_model_file, floor_texture_file=floor_texture_file
+        table_model_file = os.path.join(
+            table_model_file_path, np.random.choice(all_table_model_files)
+        )
+        floor_texture_file = os.path.join(
+            floor_texture_file_path, np.random.choice(all_floor_texture_files)
         )
 
-        self.cam_mount = [self.scene.create_actor_builder().build_kinematic(f"camera_mount_{i}") for i in range(len(self.init_cfg.camera.eye))]
-        
+        self.table_scene = TabletopSceneBuilder(
+            env=self,
+            robot_init_qpos_noise=self.robot_init_qpos_noise,
+            table_model_file=table_model_file,
+            floor_texture_file=floor_texture_file,
+        )
+
+        self.cam_mount = [
+            self.scene.create_actor_builder().build_kinematic(f"camera_mount_{i}")
+            for i in range(len(self.init_cfg.camera.eye))
+        ]
+
         self.table_scene.build()
         sapien.set_log_level("off")
         self._build_drawer()
@@ -89,7 +110,7 @@ class Drawer(RandEnv):
     def _build_drawer(self):
         # we sample random drawer model_ids with numpy as numpy is always deterministic based on seed, regardless of
         # GPU/CPU simulation backends. This is useful for replaying demonstrations.
-        train_json = '/home/irom-lab/projects/ManiSkill/mani_skill/assets/partnet_mobility/meta/info_cabinet_drawer_train.json'
+        train_json = "/home/irom-lab/projects/ManiSkill/mani_skill/assets/partnet_mobility/meta/info_cabinet_drawer_train.json"
         train_data = load_json(train_json)
         all_model_ids = np.array(list(train_data.keys()))
         rand_idx = self._episode_rng.permutation(np.arange(0, len(all_model_ids)))
@@ -102,7 +123,6 @@ class Drawer(RandEnv):
         self._drawers = []
         handle_links: List[List[Link]] = []
         handle_links_meshes: List[List[trimesh.Trimesh]] = []
-        drawer_links: List[List[Link]] = []
         for i, model_id in enumerate(model_ids):
             # partnet-mobility is a dataset source and the ids are the ones we sampled
             # we provide tools to easily create the articulation builder like so by querying
@@ -126,7 +146,7 @@ class Drawer(RandEnv):
             # TODO (stao): At the moment code for selecting semantic parts of articulations
             # is not very simple. Will be improved in the future as we add in features that
             # support part and mesh-wise annotations in a standard querable format
-            for link, joint in zip(drawer.links, drawer.joints):
+            for link, joint in zip(drawer.links, drawer.joints, strict=False):
                 if joint.type[0] in ["prismatic"]:
                     handle_links[-1].append(link)
                     # save the first mesh in the link object that correspond with a handle
@@ -140,12 +160,12 @@ class Drawer(RandEnv):
         # allowing you to manage all of them under one object and retrieve data like qpos, pose, etc. all together
         # and with high performance. Note that some properties such as qpos and qlimits are now padded.
         self.drawer = Articulation.merge(self._drawers, name="drawer")
-        
+
         # self.handle_link = Link.merge(
         #     [links[link_ids[i] % len(links)] for i, links in enumerate(handle_links)],
         #     name="handle_link",
         # )
-        
+
         self.handle_link = Link.merge(
             [links[-1] for i, links in enumerate(handle_links)],
             name="handle_link",
@@ -160,14 +180,9 @@ class Drawer(RandEnv):
                 ]
             )
         )
-        
 
         self.handle_link_normal_raw = common.to_tensor(
-            np.array(
-                [
-                    [-1.,0.,0.] for i, meshes in enumerate(handle_links_meshes)
-                ]
-            )
+            np.array([[-1.0, 0.0, 0.0] for i, meshes in enumerate(handle_links_meshes)])
         )
 
         self.handle_link_goal = actors.build_box(
@@ -178,9 +193,8 @@ class Drawer(RandEnv):
             body_type="kinematic",
             add_collision=False,
         )
-        
-    def _after_reconfigure(self, options: dict):
 
+    def _after_reconfigure(self, options: dict):
         # this value is used to set object pose so the bottom is at z=0
 
         self.drawer_length = []
@@ -189,10 +203,18 @@ class Drawer(RandEnv):
 
         for drawer in self._drawers:
             bbox = drawer.get_first_collision_mesh().bounding_box.bounds
-            self.drawer_length.append(np.maximum(np.abs(bbox[0, 0]-bbox[1,0]), np.abs(bbox[0, 1]-bbox[1,1])))
-            self.drawer_width.append(np.minimum(np.abs(bbox[0, 0]-bbox[1,0]), np.abs(bbox[0, 1]-bbox[1,1])))
-            self.drawer_height.append(np.abs(bbox[0, 2]-bbox[1,2])/2)
-        
+            self.drawer_length.append(
+                np.maximum(
+                    np.abs(bbox[0, 0] - bbox[1, 0]), np.abs(bbox[0, 1] - bbox[1, 1])
+                )
+            )
+            self.drawer_width.append(
+                np.minimum(
+                    np.abs(bbox[0, 0] - bbox[1, 0]), np.abs(bbox[0, 1] - bbox[1, 1])
+                )
+            )
+            self.drawer_height.append(np.abs(bbox[0, 2] - bbox[1, 2]) / 2)
+
         print(self.drawer_height)
         self.drawer_height = common.to_tensor(self.drawer_height)
         self.drawer_width = common.to_tensor(self.drawer_width)
@@ -206,22 +228,25 @@ class Drawer(RandEnv):
     def handle_link_positions(self, env_idx: torch.Tensor = None):
         if env_idx is None:
             return transform_points(
-                    self.handle_link.pose.to_transformation_matrix().clone(),
-                    common.to_tensor(self.handle_link_pos),
-                )
+                self.handle_link.pose.to_transformation_matrix().clone(),
+                common.to_tensor(self.handle_link_pos),
+            )
         return transform_points(
             self.handle_link.pose[env_idx].to_transformation_matrix().clone(),
             common.to_tensor(self.handle_link_pos[env_idx]),
         )
-    
-    def handle_link_orientations(self, env_idx: torch.Tensor = None):
 
+    def handle_link_orientations(self, env_idx: torch.Tensor = None):
         approaching = -self.handle_link_normal  # already rotated in the global frame
-        closing = np.array([0,0,1])   # global frame
+        closing = np.array([0, 0, 1])  # global frame
         center = self.handle_link_positions()  # global frame
-        sapien_poses = [self.agent.build_grasp_pose(approaching[i].cpu().numpy(), closing, center[i].cpu().numpy()) for i in range(len(approaching))]
-        
-        p = common.to_tensor(np.stack([pose.p for pose in sapien_poses], axis=0))
+        sapien_poses = [
+            self.agent.build_grasp_pose(
+                approaching[i].cpu().numpy(), closing, center[i].cpu().numpy()
+            )
+            for i in range(len(approaching))
+        ]
+
         q = common.to_tensor(np.stack([pose.q for pose in sapien_poses], axis=0))
         # handle_link_quat = torch.cat((p,q), dim=1)   # global
 
@@ -233,7 +258,6 @@ class Drawer(RandEnv):
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         # use the torch.device context manager to automatically create tensors on CPU or CUDA depending on self.device, the device the environment runs on
         with torch.device(self.device):
-        
             robot_pos: torch.Tensor = self._randomize_robot_pos()
             self.table_scene.initialize(env_idx, robot_pos)
             lighting = self._randomize_lighting()
@@ -246,10 +270,13 @@ class Drawer(RandEnv):
                 self.scene._gpu_fetch_all()
             extra_state_dict = dict(lighting=lighting, camera=camera_pose)
             self.save_start_state(extra_state_dict)
-            
+
             self.handle_link_goal.set_pose(
-                    Pose.create_from_pq(p=self.handle_link_positions(env_idx), q=self.handle_link_orientations(env_idx))
+                Pose.create_from_pq(
+                    p=self.handle_link_positions(env_idx),
+                    q=self.handle_link_orientations(env_idx),
                 )
+            )
             # close all the cabinets. We know beforehand that lower qlimit means "closed" for these assets.
             qlimits = self.drawer.get_qlimits()  # [b, self.cabinet.max_dof, 2])
             self.drawer.set_qpos(qlimits[env_idx, :, 0])
@@ -263,9 +290,9 @@ class Drawer(RandEnv):
                 self.scene.px.gpu_update_articulation_kinematics()
                 self.scene.px.step()
                 self.scene._gpu_fetch_all()
-            
-            print('Initialized episode.')
-        
+
+            print("Initialized episode.")
+
     def evaluate(self):
         # even though self.handle_link is a different link across different articulations
         # we can still fetch a joint that represents the parent joint of all those links
@@ -289,7 +316,7 @@ class Drawer(RandEnv):
     def _get_obs_extra(self, info: Dict):
         obs = dict(
             tcp_pose=self.agent.tcp.pose.raw_pose.clone(),
-            gripper=self.agent.robot.get_qpos()[:, -1].clone()
+            gripper=self.agent.robot.get_qpos()[:, -1].clone(),
         )
 
         if "state" in self.obs_mode:
@@ -309,82 +336,126 @@ class Drawer(RandEnv):
             self.target_qpos - self.handle_link.joint.qpos, self.target_qpos
         )
         open_reward = 2 * (1 - amount_to_open_left)
-        reaching_reward[
-            amount_to_open_left < 0.999
-        ] = 2  # if joint opens even a tiny bit, we don't need reach reward anymore
+        reaching_reward[amount_to_open_left < 0.999] = (
+            2  # if joint opens even a tiny bit, we don't need reach reward anymore
+        )
         # print(open_reward.shape)
         open_reward[info["open_enough"]] = 3  # give max reward here
         reward = reaching_reward + open_reward
         reward[info["success"]] = 5.0
         return reward
 
-    def compute_normalized_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
+    def compute_normalized_dense_reward(
+        self, obs: Any, action: torch.Tensor, info: Dict
+    ):
         max_reward = 5.0
         return self.compute_dense_reward(obs=obs, action=action, info=info) / max_reward
 
     def _randomize_obj_pos(self, env_idx):
         # here we write some randomization code that randomizes the x, y position of the cube we are pushing in the range [-0.1, -0.1] to [0.1, 0.1]
         b = len(env_idx)
-    
-        drawer_xyz = torch.zeros((b,3))
+
+        drawer_xyz = torch.zeros((b, 3))
         drawer_xyz[:, 2] = self.drawer_height
 
         # Randomize place obj position
-        drawer_xyz[:, 0] = randomize_by_percentage(
-            self.drawer_length, 
+        drawer_xyz[:, 0] = randomize_scaling(
+            self.drawer_length,
             low_percentage=self.rand_cfg.goal.low_percentage_x,
-            high_percentage=self.rand_cfg.goal.high_percentage_x
-            )
-        drawer_xyz[:, 1] = randomize_by_percentage(
-            self.drawer_width, 
+            high_percentage=self.rand_cfg.goal.high_percentage_x,
+        )
+        drawer_xyz[:, 1] = randomize_scaling(
+            self.drawer_width,
             low_percentage=self.rand_cfg.goal.low_percentage_y,
             high_percentage=self.rand_cfg.goal.high_percentage_y,
-            )
+        )
 
         # Randomize place obj rotation
-        drawer_quat = torch.zeros((b,4))
+        drawer_quat = torch.zeros((b, 4))
         q = [1, 0, 0, 0]
         q_delta_zrot_max = self.rand_cfg.object.manip_obj_delta_zrot_max
         q_delta_zrot_min = self.rand_cfg.object.manip_obj_delta_zrot_min
-        q_delta_zrot = randomize_continuous(q_delta_zrot_min, q_delta_zrot_max, b, return_list=True)
+        q_delta_zrot = randomize_absolute(
+            q_delta_zrot_min, q_delta_zrot_max, b, return_list=True
+        )
         for i, zrot in enumerate(q_delta_zrot):
-            drawer_quat[i] = common.to_tensor(quaternion_multiply(q, euler2quat(0, 0, zrot)))
-        
+            drawer_quat[i] = common.to_tensor(
+                quaternion_multiply(q, euler2quat(0, 0, zrot))
+            )
+
         self.drawer.set_pose(Pose.create_from_pq(p=drawer_xyz, q=drawer_quat))
         # if isinstance(q_delta_zrot, float):
         #     q_delta_zrot = np.array([q_delta_zrot])
         self.handle_link_normal = torch.zeros_like(self.handle_link_normal_raw)
         for i, zrot in enumerate(q_delta_zrot):
-            self.handle_link_normal[i] = rotate_vectors(self.handle_link_normal_raw[i].unsqueeze(0), 
-                                                        common.to_tensor(zrot) if len(q_delta_zrot)>1 else torch.tensor(zrot, device=self.device))
-         
+            self.handle_link_normal[i] = rotate_vectors(
+                self.handle_link_normal_raw[i].unsqueeze(0),
+                common.to_tensor(zrot)
+                if len(q_delta_zrot) > 1
+                else torch.tensor(zrot, device=self.device),
+            )
+
     def get_grasp_pose(self):
-        pose = Pose.create_from_pq(p=self.handle_link_positions(), q=self.handle_link_orientations().to(torch.float))
+        pose = Pose.create_from_pq(
+            p=self.handle_link_positions(),
+            q=self.handle_link_orientations().to(torch.float),
+        )
         return pose
-    
+
     def get_target_qpos(self):
-        
-        goal_cfg_at_global: sapien.Pose = copy.deepcopy(self.get_grasp_pose()) # in global frame
+        goal_cfg_at_global: sapien.Pose = copy.deepcopy(
+            self.get_grasp_pose()
+        )  # in global frame
         q0 = self.agent.robot.get_qpos().clone()
         goal_cfg_at_base = self.agent.robot.pose.inv() * goal_cfg_at_global
-        goal_qpos_for_arm = self.agent.controller.controllers['arm'].kinematics.compute_ik(target_pose=goal_cfg_at_base, q0=q0, use_delta_ik_solver=False)
-        goal_qpos_for_gripper = torch.ones_like(goal_qpos_for_arm)[:, :2]  # 2 dim, one gripper hand mimic the other so just set them the same
+        goal_qpos_for_arm = self.agent.controller.controllers[
+            "arm"
+        ].kinematics.compute_ik(
+            target_pose=goal_cfg_at_base, q0=q0, use_delta_ik_solver=False
+        )
+        goal_qpos_for_gripper = torch.ones_like(goal_qpos_for_arm)[
+            :, :2
+        ]  # 2 dim, one gripper hand mimic the other so just set them the same
         qpos_to_set = torch.cat((goal_qpos_for_arm, goal_qpos_for_gripper), dim=-1)
-        
-        pull_direction: torch.Tensor = self.unwrapped.handle_link_normal.clone()
-        goal_pose_for_pull = Pose.create_from_pq(p=goal_cfg_at_global.p+pull_direction*0.2, q=goal_cfg_at_global.q)
-        goal_pose_for_pull_at_base = self.agent.robot.pose.inv() * goal_pose_for_pull
-        goal_qpos_for_pull_arm = self.agent.controller.controllers['arm'].kinematics.compute_ik(target_pose=goal_pose_for_pull_at_base, q0=q0, use_delta_ik_solver=False)
-        goal_qpos_for_pull_gripper = torch.ones_like(goal_qpos_for_pull_arm)[:, :1]*(-1)
-        qpos_to_set_pull_start_arm = self.agent.controller.controllers['arm'].kinematics.compute_ik(target_pose=goal_cfg_at_base, q0=q0, use_delta_ik_solver=False)
-        qpos_to_set_pull_start = torch.cat((qpos_to_set_pull_start_arm, goal_qpos_for_pull_gripper), dim=-1)
-        qpos_to_set_for_pull = torch.cat((goal_qpos_for_pull_arm, goal_qpos_for_pull_gripper), dim=-1)
-        qpos_paths_for_pull = interpolate_trajectory(torch.cat((qpos_to_set_pull_start.unsqueeze(1), qpos_to_set_for_pull.unsqueeze(1)), dim=1), 10)
-    
-        return qpos_to_set, qpos_paths_for_pull
-    
-    def visualize_mesh(self, meshes):
 
+        pull_direction: torch.Tensor = self.unwrapped.handle_link_normal.clone()
+        goal_pose_for_pull = Pose.create_from_pq(
+            p=goal_cfg_at_global.p + pull_direction * 0.2, q=goal_cfg_at_global.q
+        )
+        goal_pose_for_pull_at_base = self.agent.robot.pose.inv() * goal_pose_for_pull
+        goal_qpos_for_pull_arm = self.agent.controller.controllers[
+            "arm"
+        ].kinematics.compute_ik(
+            target_pose=goal_pose_for_pull_at_base, q0=q0, use_delta_ik_solver=False
+        )
+        goal_qpos_for_pull_gripper = torch.ones_like(goal_qpos_for_pull_arm)[:, :1] * (
+            -1
+        )
+        qpos_to_set_pull_start_arm = self.agent.controller.controllers[
+            "arm"
+        ].kinematics.compute_ik(
+            target_pose=goal_cfg_at_base, q0=q0, use_delta_ik_solver=False
+        )
+        qpos_to_set_pull_start = torch.cat(
+            (qpos_to_set_pull_start_arm, goal_qpos_for_pull_gripper), dim=-1
+        )
+        qpos_to_set_for_pull = torch.cat(
+            (goal_qpos_for_pull_arm, goal_qpos_for_pull_gripper), dim=-1
+        )
+        qpos_paths_for_pull = interpolate_trajectory(
+            torch.cat(
+                (
+                    qpos_to_set_pull_start.unsqueeze(1),
+                    qpos_to_set_for_pull.unsqueeze(1),
+                ),
+                dim=1,
+            ),
+            10,
+        )
+
+        return qpos_to_set, qpos_paths_for_pull
+
+    def visualize_mesh(self, meshes):
         import matplotlib.pyplot as plt
 
         for i, handle_mesh in enumerate(meshes):
@@ -397,19 +468,35 @@ class Drawer(RandEnv):
             # face_normals = get_normal_axis_direction(handle_mesh).squeeze()
 
             fig = plt.figure()
-            ax = fig.add_subplot(111, projection='3d')
+            ax = fig.add_subplot(111, projection="3d")
 
             # Plot the point cloud of the mesh
-            ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2], color='cyan', s=2, label='Point Cloud')
+            ax.scatter(
+                point_cloud[:, 0],
+                point_cloud[:, 1],
+                point_cloud[:, 2],
+                color="cyan",
+                s=2,
+                label="Point Cloud",
+            )
 
             # Plot the face normals (centroids + normal vectors)
-            ax.quiver(face_centroids[0], face_centroids[1], face_centroids[2],
-                    face_normals[0], face_normals[1], face_normals[2], length=0.05, color='red', label='Face Normals')
+            ax.quiver(
+                face_centroids[0],
+                face_centroids[1],
+                face_centroids[2],
+                face_normals[0],
+                face_normals[1],
+                face_normals[2],
+                length=0.05,
+                color="red",
+                label="Face Normals",
+            )
 
             # Labels and plot settings
-            ax.set_xlabel('X')
-            ax.set_ylabel('Y')
-            ax.set_zlabel('Z')
+            ax.set_xlabel("X")
+            ax.set_ylabel("Y")
+            ax.set_zlabel("Z")
             ax.legend()
 
             # Save the plot as an image file (e.g., PNG)

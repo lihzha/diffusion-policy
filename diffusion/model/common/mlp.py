@@ -5,11 +5,11 @@ Residual model is taken from https://github.com/ALRhub/d3il/blob/main/agents/mod
 
 """
 
+import logging
+from collections import OrderedDict
+
 import torch
 from torch import nn
-from collections import OrderedDict
-import logging
-
 
 activation_dict = nn.ModuleDict(
     {

@@ -78,13 +78,14 @@ robomimic dataset normalizes action to [-1, 1], observation roughly? to [-1, 1].
 
 """
 
-import numpy as np
-from tqdm import tqdm
-import h5py
+import logging
 import os
 import random
 from copy import deepcopy
-import logging
+
+import h5py
+import numpy as np
+from tqdm import tqdm
 
 
 def make_dataset(load_path, save_dir, save_name_prefix, val_split, normalize):
