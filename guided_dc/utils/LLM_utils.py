@@ -1,12 +1,14 @@
 import os
-from openai import OpenAI
 import pickle
 from collections import defaultdict
+
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 def create_or_load_cache(cache_file):
     if not os.path.exists(os.path.dirname(cache_file)):
@@ -20,7 +22,7 @@ def create_or_load_cache(cache_file):
     return cache
 
 
-def query_LLM(prompt, stop_sequences, cache_file, model_type='gpt-3.5-turbo'):
+def query_LLM(prompt, stop_sequences, cache_file, model_type="gpt-3.5-turbo"):
     cache = create_or_load_cache(cache_file)
     answer = cache[prompt].get(model_type, None)
     if answer is None:
@@ -29,17 +31,17 @@ def query_LLM(prompt, stop_sequences, cache_file, model_type='gpt-3.5-turbo'):
         while not success and max_retry > 0:
             try:
                 response = client.chat.completions.create(
-                            messages=[
-                                {
-                                    "role": "system",
-                                    "content": prompt,
-                                }
-                            ],
-                            model=model_type,
-                            temperature=1,
-                            stop=stop_sequences,
-                            max_tokens=3000
-                            )
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": prompt,
+                        }
+                    ],
+                    model=model_type,
+                    temperature=1,
+                    stop=stop_sequences,
+                    max_tokens=3000,
+                )
                 success = True
             except Exception as e:
                 print("Error encountered")
@@ -669,6 +671,6 @@ class MujocoRRT:
     Explain what this py file is doing in details. I want to reproduce the same thing. Also include basic knowledge about trees.
     '''
     stop_sequences = []
-    cache_file = 'cache/llm_test_correction.pkl'
-    response = query_LLM(prompt, stop_sequences, cache_file, 'gpt-4o-mini')
+    cache_file = "cache/llm_test_correction.pkl"
+    response = query_LLM(prompt, stop_sequences, cache_file, "gpt-4o-mini")
     print(response)

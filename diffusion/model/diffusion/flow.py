@@ -7,15 +7,14 @@ https://github.com/gle-bellier/flow-matching/blob/main/Flow_Matching.ipynb
 """
 
 import logging
-import torch
-from torch import nn
-import numpy as np
-
-log = logging.getLogger(__name__)
-
 from collections import namedtuple
 
+import numpy as np
+import torch
+from torch import nn
+
 Sample = namedtuple("Sample", "trajectories chains")  # not saving intermediates
+log = logging.getLogger(__name__)
 
 
 def sample_from_transformed_beta(alpha, beta, s=0.999, size=1):
@@ -32,7 +31,6 @@ def sample_from_transformed_beta(alpha, beta, s=0.999, size=1):
 
 
 class FlowModel(nn.Module):
-
     def __init__(
         self,
         network,
@@ -135,8 +133,8 @@ class FlowModel(nn.Module):
 
 
 if "__main__" == __name__:
-    import numpy as np
     import matplotlib.pyplot as plt
+    import numpy as np
 
     # Parameters
     alpha = 1.5

@@ -1,17 +1,18 @@
-import torch
-import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.animation import FuncAnimation, FFMpegWriter
-from scipy.spatial.transform import Rotation as R
+import numpy as np
 import open3d as o3d
+import torch
+from matplotlib.animation import FFMpegWriter, FuncAnimation
+
 from guided_dc.utils.pose_utils import quaternion_to_rotation_matrix
 
 
-def visualize_trajectory_as_video(ee_pose_path, video_filename="ee_trajectory.mp4", fps=30):
+def visualize_trajectory_as_video(
+    ee_pose_path, video_filename="ee_trajectory.mp4", fps=30
+):
     """
     Visualizes a (traj_len, 7) end effector pose trajectory as a 3D animation and saves it as a video.
-    
+
     Args:
         ee_pose_path (torch.Tensor): End effector trajectory of shape (traj_len, 7) in the form of position + quaternion.
         video_filename (str): The name of the output video file.
@@ -20,7 +21,7 @@ def visualize_trajectory_as_video(ee_pose_path, video_filename="ee_trajectory.mp
     # Convert tensor to CPU if it's on the GPU
     if ee_pose_path.is_cuda:
         ee_pose_path = ee_pose_path.cpu()
-    
+
     # Extract positions and quaternions
     traj_len = ee_pose_path.shape[0]
     positions = ee_pose_path[:, :3].numpy()  # (traj_len, 3)
@@ -28,7 +29,7 @@ def visualize_trajectory_as_video(ee_pose_path, video_filename="ee_trajectory.mp
 
     # Set up the figure and 3D axis
     fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
+    ax = fig.add_subplot(111, projection="3d")
 
     # Set up plot limits
     ax.set_xlim([positions[:, 0].min() - 0.1, positions[:, 0].max() + 0.1])
@@ -36,39 +37,55 @@ def visualize_trajectory_as_video(ee_pose_path, video_filename="ee_trajectory.mp
     ax.set_zlim([positions[:, 2].min() - 0.1, positions[:, 2].max() + 0.1])
 
     # Initialize a point and an arrow for the end effector
-    point, = ax.plot([], [], [], 'bo', markersize=8)  # Blue dot for position
-    arrow = ax.quiver(0, 0, 0, 0, 0, 0, color='r')  # Red arrow for orientation (initialize)
+    (point,) = ax.plot([], [], [], "bo", markersize=8)  # Blue dot for position
+    arrow = ax.quiver(
+        0, 0, 0, 0, 0, 0, color="r"
+    )  # Red arrow for orientation (initialize)
 
     def update_frame(i):
         """
         Update the frame of the animation.
-        
+
         Args:
             i (int): Frame index.
         """
         # Update point position
-        point.set_data([positions[i, 0]], [positions[i, 1]])  # Wrap x, y positions in a list
+        point.set_data(
+            [positions[i, 0]], [positions[i, 1]]
+        )  # Wrap x, y positions in a list
         point.set_3d_properties([positions[i, 2]])  # Wrap z position in a list
 
         # Update arrow orientation using quaternion
-        R = quaternion_to_rotation_matrix(torch.tensor(quaternions[i]))  # Rotation matrix
-        arrow_data = R @ torch.tensor([1, 0, 0], dtype=torch.float32)  # Rotate the x-axis to get the arrow
+        R = quaternion_to_rotation_matrix(
+            torch.tensor(quaternions[i])
+        )  # Rotation matrix
+        arrow_data = R @ torch.tensor(
+            [1, 0, 0], dtype=torch.float32
+        )  # Rotate the x-axis to get the arrow
         # Update arrow with new direction
-        arrow.set_segments([[[positions[i, 0], positions[i, 1], positions[i, 2]], 
-                             [positions[i, 0] + arrow_data[0].item(), 
-                              positions[i, 1] + arrow_data[1].item(), 
-                              positions[i, 2] + arrow_data[2].item()]]])
+        arrow.set_segments(
+            [
+                [
+                    [positions[i, 0], positions[i, 1], positions[i, 2]],
+                    [
+                        positions[i, 0] + arrow_data[0].item(),
+                        positions[i, 1] + arrow_data[1].item(),
+                        positions[i, 2] + arrow_data[2].item(),
+                    ],
+                ]
+            ]
+        )
 
         return point, arrow
 
     # Create the animation
-    ani = FuncAnimation(fig, update_frame, frames=traj_len, interval=1000/fps)
+    ani = FuncAnimation(fig, update_frame, frames=traj_len, interval=1000 / fps)
 
     # Save the animation as a video file
-    writer = FFMpegWriter(fps=fps, metadata=dict(artist='Lihan Zha'), bitrate=1800)
+    writer = FFMpegWriter(fps=fps, metadata=dict(artist="Lihan Zha"), bitrate=1800)
     ani.save(video_filename, writer=writer)
     print(f"Saved trajectory animation to {video_filename}")
-    
+
     # Close the plot after saving
     plt.close(fig)
 
@@ -83,9 +100,12 @@ def trimesh_to_open3d(trimesh_mesh):
 
     # Optionally set vertex colors if available
     if trimesh_mesh.visual.vertex_colors is not None:
-        o3d_mesh.vertex_colors = o3d.utility.Vector3dVector(trimesh_mesh.visual.vertex_colors[:, :3] / 255.0)
+        o3d_mesh.vertex_colors = o3d.utility.Vector3dVector(
+            trimesh_mesh.visual.vertex_colors[:, :3] / 255.0
+        )
 
     return o3d_mesh
+
 
 # Convert trimesh mesh to open3d mesh
 def visualize_trimesh(trimesh_mesh, extra_pts=None):

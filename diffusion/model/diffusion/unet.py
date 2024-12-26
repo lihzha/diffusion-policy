@@ -5,25 +5,25 @@ Set `smaller_encoder` to False for using larger observation encoder in ResidualB
 
 """
 
+import logging
+
+import einops
 import torch
 import torch.nn as nn
-import einops
 from einops.layers.torch import Rearrange
-import logging
+
+from diffusion.model.common.mlp import ResidualMLP
+from diffusion.model.diffusion.modules import (
+    Conv1dBlock,
+    Downsample1d,
+    SinusoidalPosEmb,
+    Upsample1d,
+)
 
 log = logging.getLogger(__name__)
 
-from diffusion.model.diffusion.modules import (
-    SinusoidalPosEmb,
-    Downsample1d,
-    Upsample1d,
-    Conv1dBlock,
-)
-from diffusion.model.common.mlp import ResidualMLP
-
 
 class ResidualBlock1D(nn.Module):
-
     def __init__(
         self,
         in_channels,
@@ -63,7 +63,7 @@ class ResidualBlock1D(nn.Module):
         elif activation_type == "ReLU":
             act = nn.ReLU()
         else:
-            raise "Unknown activation type for ConditionalResidualBlock1D"
+            raise ValueError("Unknown activation type for ConditionalResidualBlock1D")
 
         # FiLM modulation https://arxiv.org/abs/1709.07871
         # predicts per-channel scale and bias
@@ -117,7 +117,6 @@ class ResidualBlock1D(nn.Module):
 
 
 class Unet1D(nn.Module):
-
     def __init__(
         self,
         action_dim,
@@ -135,7 +134,7 @@ class Unet1D(nn.Module):
     ):
         super().__init__()
         dims = [action_dim, *map(lambda m: dim * m, dim_mults)]
-        in_out = list(zip(dims[:-1], dims[1:]))
+        in_out = list(zip(dims[:-1], dims[1:]))  # noqa: RUF007
         log.info(f"Channel dimensions: {in_out}")
 
         # timestep embedding
@@ -150,7 +149,7 @@ class Unet1D(nn.Module):
         # additional obs encoder
         if cond_mlp_dims is not None:
             self.cond_mlp = ResidualMLP(
-                dim_list=[cond_dim] + cond_mlp_dims,
+                dim_list=[cond_dim, *cond_mlp_dims],
                 activation_type=activation_type,
                 out_activation_type="Identity",
             )
@@ -327,7 +326,6 @@ class Unet1D(nn.Module):
 
 
 class VisionUnet1D(nn.Module):
-
     def __init__(
         self,
         backbone,
@@ -343,10 +341,14 @@ class VisionUnet1D(nn.Module):
         activation_type="Mish",
         cond_predict_scale=False,
         groupnorm_eps=1e-5,
+        use_prio=True,
     ):
         super().__init__()
+        self.use_prio = use_prio
+        if not use_prio:
+            cond_dim = 0
         dims = [action_dim, *map(lambda m: dim * m, dim_mults)]
-        in_out = list(zip(dims[:-1], dims[1:]))
+        in_out = list(zip(dims[:-1], dims[1:]))  # noqa: RUF007
         log.info(f"Channel dimensions: {in_out}")
 
         # vision
@@ -365,7 +367,7 @@ class VisionUnet1D(nn.Module):
         # additional obs encoder
         if cond_mlp_dims is not None:
             self.cond_mlp = ResidualMLP(
-                dim_list=[cond_dim] + cond_mlp_dims,
+                dim_list=[cond_dim, *cond_mlp_dims],
                 activation_type=activation_type,
                 out_activation_type="Identity",
             )
@@ -496,19 +498,26 @@ class VisionUnet1D(nn.Module):
         # move chunk dim to the end
         x = einops.rearrange(x, "b h t -> b t h")
 
-        # flatten history
-        state = cond["state"].view(B, -1)
+        if self.use_prio:
+            # flatten history
+            state = cond["state"].view(B, -1)
 
-        # state encoder
-        if hasattr(self, "cond_mlp"):
-            state = self.cond_mlp(state)
+            # state encoder
+            if hasattr(self, "cond_mlp"):
+                state = self.cond_mlp(state)
+
+        else:
+            state = None
 
         # visual encoder
         rgb = cond["rgb"].copy()
         vis_feat = self.backbone(rgb, state)  # [batch, embed_dim]
 
-        # global features
-        cond_encoded = torch.cat([vis_feat, state], dim=-1)
+        if self.use_prio:
+            # global features
+            cond_encoded = torch.cat([vis_feat, state], dim=-1)
+        else:
+            cond_encoded = vis_feat
 
         # time feature
         if not torch.is_tensor(time):

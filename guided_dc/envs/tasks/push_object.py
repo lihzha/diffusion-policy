@@ -15,23 +15,21 @@ in addition to initializing any task relevant data like a goal
 See comments for how to make your own environment and what each required function should do
 """
 
-from typing import Any, Dict, Union
-import numpy as np
-import torch
-import sapien
-from transforms3d.euler import euler2quat
+from typing import Any, ClassVar, Dict, Union
 
+import numpy as np
+import sapien
+import torch
 from mani_skill.agents.robots import Fetch, Panda
+from mani_skill.utils import common
 from mani_skill.utils.building import actors
 from mani_skill.utils.registration import register_env
-from mani_skill.utils.structs.types import Array
 from mani_skill.utils.structs import Pose
-from mani_skill.utils import common
+from mani_skill.utils.structs.types import Array
 
-from guided_dc.envs.wrappers.randomized_env import RandEnv
+from guided_dc.envs.randomized_env import RandEnv
 from guided_dc.envs.scenes.tabletop_scene_builder import TabletopSceneBuilder
-from guided_dc.utils.randomization import randomize_continuous
-from guided_dc.utils.pose_utils import quaternion_multiply
+
 
 @register_env("PushObject-v1", max_episode_steps=50)
 class PushObjectEnv(RandEnv):
@@ -52,7 +50,7 @@ class PushObjectEnv(RandEnv):
     Visualization: https://maniskill.readthedocs.io/en/latest/tasks/index.html#pushcube-v1
     """
 
-    SUPPORTED_ROBOTS = ["panda", "fetch"]
+    SUPPORTED_ROBOTS: ClassVar[list] = ["panda", "fetch"]
 
     # Specify some supported robot types
     agent: Union[Panda, Fetch]
@@ -63,9 +61,11 @@ class PushObjectEnv(RandEnv):
 
     def __init__(self, *args, robot_uids="panda", **kwargs):
         # specifying robot_uids="panda" as the default means gym.make("PushCube-v1") will default to using the panda arm.
-        self.init_cfg = kwargs.pop('init')
+        self.init_cfg = kwargs.pop("init")
         self.robot_init_qpos_noise = self.init_cfg.robot.robot_init_qpos_noise
-        super().__init__(*args, robot_uids=robot_uids, rand_cfg=kwargs.pop('rand'), **kwargs)
+        super().__init__(
+            *args, robot_uids=robot_uids, rand_cfg=kwargs.pop("rand"), **kwargs
+        )
 
     def _load_scene(self, options: dict):
         # we use a prebuilt scene builder class that automatically loads in a floor and table.
@@ -73,7 +73,9 @@ class PushObjectEnv(RandEnv):
             env=self, robot_init_qpos_noise=self.robot_init_qpos_noise
         )
 
-        self.cam_mount = self.scene.create_actor_builder().build_kinematic("camera_mount")
+        self.cam_mount = self.scene.create_actor_builder().build_kinematic(
+            "camera_mount"
+        )
         self.table_scene.build()
 
         # we then add the cube that we want to push and give it a color and size using a convenience build_cube function
@@ -114,23 +116,20 @@ class PushObjectEnv(RandEnv):
             self._randomize_camera_pose()
             self._randomize_obj_pos(env_idx, self.manip_obj, self.goal_obj)
 
-
     def _build_manip_obj(self, obj_name):
-
-        if obj_name == 'cube':
+        if obj_name == "cube":
             self.manip_obj = actors.build_cube(
-            self.scene,
-            half_size=self.cube_half_size,
-            color=np.array([12, 42, 160, 255]) / 255,
-            name="cube",
-            body_type="dynamic",
-        )
+                self.scene,
+                half_size=self.cube_half_size,
+                color=np.array([12, 42, 160, 255]) / 255,
+                name="cube",
+                body_type="dynamic",
+            )
 
         else:
             self.manip_obj, self._manip_objs = self._load_assets(obj_name)
 
     def _after_reconfigure(self, options: dict):
-
         self.manip_obj_height = []
         for obj in self._manip_objs:
             collision_mesh = obj.get_first_collision_mesh()

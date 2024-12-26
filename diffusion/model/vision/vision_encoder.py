@@ -1,6 +1,6 @@
-import torch.nn as nn
 import einops
 import torch
+import torch.nn as nn
 
 from diffusion.model.vision.modules import SpatialEmb
 
@@ -32,12 +32,31 @@ class VisionEncoder(nn.Module):
         share_embed_head=False,
         use_large_patch=False,
     ):
-
         super().__init__()
 
         # 1. Augmentation
         if aug is not None:
             self.aug = torch.nn.Sequential(*aug)
+            if "custom_vit" in model_name:
+                from diffusion.model.vision.modules import CropRandomizer
+
+                for i in range(len(self.aug)):
+                    if isinstance(self.aug[i], CropRandomizer):
+                        if self.aug[i].crop_height % patch_size != 0:
+                            nearest_crop_height_pct = (
+                                self.aug[i].crop_height // patch_size * patch_size
+                            ) / img_size[-1]
+                            raise ValueError(
+                                f"crop_height should be divisible by patch_size. Nearest crop_height percentage: {nearest_crop_height_pct}"
+                            )
+                        if self.aug[i].crop_width % patch_size != 0:
+                            nearest_crop_width_pct = (
+                                self.aug[i].crop_width // patch_size * patch_size
+                            ) / img_size[-2]
+                            raise ValueError(
+                                f"crop_width should be divisible by patch_size. Nearest crop_width percentage: {nearest_crop_width_pct}"
+                            )
+                        break
             self.raw_img_size = img_size.copy()
             img_size = self.aug(torch.randint(0, 256, (1, *img_size))).shape[-3:]
         else:
@@ -178,6 +197,21 @@ class VisionEncoder(nn.Module):
             rgb[k] = einops.rearrange(rgb[k], "b cs c h w -> (b cs) c h w")
             if self.aug:
                 rgb[k] = self.aug(rgb[k])
+        # if aggregate:
+        #     cv2.imwrite(
+        #         "i0.png",
+        #         cv2.cvtColor(
+        #             (rgb["0"].cpu().numpy()[0].transpose(1, 2, 0) + 0.5) * 255,
+        #             cv2.COLOR_BGR2RGB,
+        #         ),
+        #     )
+        # cv2.imwrite(
+        #     "i2.png",
+        #     cv2.cvtColor(
+        #         (rgb["2"].cpu().numpy()[0].transpose(1, 2, 0) + 0.5) * 255,
+        #         cv2.COLOR_BGR2RGB,
+        #     ),
+        # )
         feat = self.model.forward(
             rgb
         )  # (bs * img_cond_steps * num_views, patch_nums, embed_dim)
@@ -261,8 +295,8 @@ class VisionEncoder(nn.Module):
 
 
 if __name__ == "__main__":
-
     import math
+
     from omegaconf import OmegaConf
 
     # allows arbitrary python code execution in configs using the ${eval:''} resolver

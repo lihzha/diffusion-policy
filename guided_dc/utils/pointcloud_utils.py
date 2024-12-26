@@ -1,21 +1,18 @@
 from __future__ import annotations
-from copy import copy
+
 from typing import (
     Dict,
-    Optional,
-    Sequence,
-    Tuple,
 )
+
 import matplotlib.pyplot as plt
 import numpy as np
 import open3d as o3d
-from pydantic.dataclasses import dataclass
 from pydantic import ConfigDict
+from pydantic.dataclasses import dataclass
 
 RGB_DTYPE = np.uint8
 DEPTH_DTYPE = np.float32
 SEGMENTATION_DTYPE = bool
-
 
 
 @dataclass(config=ConfigDict(arbitrary_types_allowed=True), frozen=True)
@@ -24,7 +21,7 @@ class PointCloud:
     normals: np.ndarray
     rgb_pts: np.ndarray = None
     segmentation_pts: Dict[str, np.ndarray] = None
-    
+
     @classmethod
     def rgb_dtype(cls, rgb_pts: np.ndarray):
         if (
@@ -135,7 +132,7 @@ class PointCloud:
     #     # visualize
     #     return np.asarray(pcd.normals)
 
-    def filter_bounds(self, bounds: Tuple[Point3D, Point3D]):
+    def filter_bounds(self, bounds):
         in_bounds_mask = np.logical_and(
             (self.xyz_pts > np.array(bounds[0])).all(axis=1),
             (self.xyz_pts < np.array(bounds[1])).all(axis=1),
@@ -149,7 +146,9 @@ class PointCloud:
             },
         )
 
-    def subsample(self, num_pts: int, numpy_random: np.random.RandomState) -> PointCloud:
+    def subsample(
+        self, num_pts: int, numpy_random: np.random.RandomState
+    ) -> PointCloud:
         indices = numpy_random.choice(
             len(self), size=num_pts, replace=num_pts > len(self)
         )
@@ -189,9 +188,6 @@ class PointCloud:
         )
 
     def visualize_mesh(self, meshes):
-
-        import matplotlib.pyplot as plt
-
         for i, handle_mesh in enumerate(meshes):
             # Sample points from the mesh surface (point cloud)
             num_points = 10000
@@ -202,19 +198,35 @@ class PointCloud:
             # face_normals = get_normal_axis_direction(handle_mesh).squeeze()
 
             fig = plt.figure()
-            ax = fig.add_subplot(111, projection='3d')
+            ax = fig.add_subplot(111, projection="3d")
 
             # Plot the point cloud of the mesh
-            ax.scatter(point_cloud[:, 0], point_cloud[:, 1], point_cloud[:, 2], color='cyan', s=2, label='Point Cloud')
+            ax.scatter(
+                point_cloud[:, 0],
+                point_cloud[:, 1],
+                point_cloud[:, 2],
+                color="cyan",
+                s=2,
+                label="Point Cloud",
+            )
 
             # Plot the face normals (centroids + normal vectors)
-            ax.quiver(face_centroids[0], face_centroids[1], face_centroids[2],
-                    face_normals[0], face_normals[1], face_normals[2], length=0.05, color='red', label='Face Normals')
+            ax.quiver(
+                face_centroids[0],
+                face_centroids[1],
+                face_centroids[2],
+                face_normals[0],
+                face_normals[1],
+                face_normals[2],
+                length=0.05,
+                color="red",
+                label="Face Normals",
+            )
 
             # Labels and plot settings
-            ax.set_xlabel('X')
-            ax.set_ylabel('Y')
-            ax.set_zlabel('Z')
+            ax.set_xlabel("X")
+            ax.set_ylabel("Y")
+            ax.set_zlabel("Z")
             ax.legend()
 
             # Save the plot as an image file (e.g., PNG)

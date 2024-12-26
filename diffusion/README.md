@@ -5,7 +5,6 @@
 ```console
 python script/dataset/process_real_dataset.py
 ```
-
 <!-- The data path follows `${DPPO_DATA_DIR}/<benchmark>/<task>/train.npz`, e.g., `${DPPO_DATA_DIR}/gym/hopper-medium-v2/train.npz`. -->
 
 ### Run pre-training with data

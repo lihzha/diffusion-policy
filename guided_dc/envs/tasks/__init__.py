@@ -1,5 +1,6 @@
-from .push_object import PushObjectEnv
-from .pick_and_place import PickAndPlace
 from .open_drawer import Drawer
-print('*')
-print('Customed tasks initialized!')
+from .pick_and_place import PickAndPlace
+from .push_object import PushObjectEnv
+
+print("*")
+print("Customed tasks initialized!")

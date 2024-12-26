@@ -5,9 +5,10 @@ Additional implementation of the ViT image encoder from https://github.com/hengy
 
 import torch
 import torch.nn as nn
-import torchvision.transforms.functional as ttf
-import guided_dc.utils.tensor_util as tu
 import torchvision
+import torchvision.transforms.functional as ttf
+
+import guided_dc.utils.tensor_util as tu
 
 
 class SpatialEmb(nn.Module):
@@ -271,8 +272,6 @@ def crop_image_from_indices(
     num_crops = crop_indices.shape[-2]
 
     # make sure @crop_indices are in valid range
-    assert (crop_indices[..., 0] >= 0).all().item()
-    assert (crop_indices[..., 0] < (image_h - crop_height)).all().item()
     assert (crop_indices[..., 1] >= 0).all().item()
     assert (crop_indices[..., 1] < (image_w - crop_width)).all().item()
 
@@ -352,6 +351,7 @@ def sample_random_image_crops(
         pos_enc (bool): if True, also add 2 channels to the outputs that gives a spatial
             encoding of the original source pixel locations. This means that the
             output crops will contain information about where in the source image
+            output crops will contain information about where in the source image
             it was sampled from.
 
     Returns:
@@ -387,6 +387,7 @@ def sample_random_image_crops(
 
     # Sample crop locations for all tensor dimensions up to the last 3, which are [C, H, W].
     # Each gets @num_crops samples - typically this will just be the batch dimension (B), so
+    # Each gets @num_crops samples - typically this will just be the batch dimension (B), so
     # we will sample [B, N] indices, but this supports having more than one leading dimension,
     # or possibly no leading dimension.
     #
@@ -412,17 +413,39 @@ def sample_random_image_crops(
 
 
 class ColorJitter(nn.Module):
-    def __init__(self, brightness=0.3, contrast=0.4, saturation=0.5, hue=0.1):
+    def __init__(self, brightness=0.3, contrast=0.4, saturation=0.5, hue=0.12, p=0.8):
         super().__init__()
         self.color_jitter = torchvision.transforms.ColorJitter(
             brightness=brightness, contrast=contrast, saturation=saturation, hue=hue
         )
+        self.p = p
 
     def forward(self, x):
         if self.training:
-            return self.color_jitter(x)
-        else:
-            return x
+            if torch.rand(1) < self.p:
+                x = x / 255.0
+                x = self.color_jitter(x)
+                x = x * 255.0
+                return x
+        return x
+
+
+class GaussianBlur(nn.Module):
+    def __init__(self, kernel_size=9, sigma=(0.1, 2.0), p=0.8):
+        super().__init__()
+        self.t = torchvision.transforms.GaussianBlur(
+            kernel_size=kernel_size, sigma=sigma
+        )
+        self.p = p
+
+    def forward(self, x):
+        if self.training:
+            if torch.rand(1) < self.p:
+                x = x / 255.0
+                x = self.t(x)
+                x = x * 255.0
+                return x
+        return x
 
 
 class Resize(nn.Module):
@@ -436,7 +459,8 @@ class Resize(nn.Module):
         if x.size()[-3:] == self.size:
             return x
         else:
-            return self.resize(x)
+            x = self.resize(x)
+            return x
 
 
 class Normalize(nn.Module):
@@ -492,7 +516,30 @@ if __name__ == "__main__":
     # image_aug = Image.fromarray(image_aug.astype(np.uint8))
     # image_aug.save("image_aug4.jpg")
 
-    smb = SpatialEmb(num_patch=113, patch_dim=512, prop_dim=7, proj_dim=43, dropout=0.0)
-    feat = torch.randn(3, 113, 512)
-    state = torch.randn(3, 7)
-    out = smb(feat, state)
+    # smb = SpatialEmb(num_patch=113, patch_dim=512, prop_dim=7, proj_dim=43, dropout=0.0)
+    # feat = torch.randn(3, 113, 512)
+    # state = torch.randn(3, 7)
+    # out = smb(feat, state)
+
+    import cv2
+
+    # Read the image
+    img = cv2.imread(
+        "image_0.png",
+        cv2.IMREAD_UNCHANGED,
+    )
+    img = torch.tensor(img[:, :, :3]).permute(2, 1, 0).float() / 255
+    print(img.shape)
+    cj = ColorJitter(hue=0.03, brightness=0.2, contrast=0.1, saturation=0.1)
+    # cc = CropRandomizer(
+    #     input_shape=(3, 640, 480),
+    #     crop_height_pct=0.8,
+    #     crop_width_pct=0.8,
+    #     num_crops=1,
+    #     pos_enc=False,
+    # )
+    for i in range(10):
+        # cc_img = cc(img)
+        cj_img = cj(img)
+        cj_img = cj_img.squeeze().permute(2, 1, 0).numpy() * 255
+        cv2.imwrite(f"color_jitter_{i}.png", cj_img)

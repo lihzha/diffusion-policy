@@ -6,8 +6,10 @@ Modified from https://github.com/real-stanford/diffusion_policy/blob/main/diffus
 """
 
 import logging
+
 import torch
 import torch.nn as nn
+
 from diffusion.model.diffusion.modules import SinusoidalPosEmb
 
 logger = logging.getLogger(__name__)
@@ -30,7 +32,6 @@ class Gaussian_Transformer(nn.Module):
         std_min=0.01,
         std_max=1,
     ):
-
         super().__init__()
         self.action_dim = action_dim
         self.horizon_steps = horizon_steps
@@ -117,7 +118,6 @@ class GMM_Transformer(nn.Module):
         std_min=0.01,
         std_max=1,
     ):
-
         super().__init__()
         self.num_modes = num_modes
         self.action_dim = action_dim
@@ -127,9 +127,7 @@ class GMM_Transformer(nn.Module):
         if fixed_std is None:
             output_dim += num_modes * action_dim  # logvar for each mode
             logger.info("Using learned std")
-        elif (
-            learn_fixed_std
-        ):  # initialize to fixed_std, separate for each action and mode, but same along horizon
+        elif learn_fixed_std:  # initialize to fixed_std, separate for each action and mode, but same along horizon
             self.logvar = torch.nn.Parameter(
                 torch.log(
                     torch.tensor([fixed_std**2 for _ in range(num_modes * action_dim)])

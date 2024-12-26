@@ -9,25 +9,23 @@ Annotated DDIM/DDPM: https://nn.labml.ai/diffusion/stable_diffusion/sampler/ddpm
 """
 
 import logging
-import torch
-from torch import nn
-import torch.nn.functional as F
+from collections import namedtuple
 
-log = logging.getLogger(__name__)
+import torch
+import torch.nn.functional as F
+from torch import nn
 
 from diffusion.model.diffusion.sampling import (
-    extract,
     cosine_beta_schedule,
+    extract,
     make_timesteps,
 )
 
-from collections import namedtuple
-
+log = logging.getLogger(__name__)
 Sample = namedtuple("Sample", "trajectories chains")
 
 
 class DiffusionModel(nn.Module):
-
     def __init__(
         self,
         network,
@@ -106,7 +104,7 @@ class DiffusionModel(nn.Module):
         """
         self.alphas = 1.0 - self.betas
         """
-        α̅ₜ= ∏ᵗₛ₌₁ αₛ 
+        α̅ₜ= ∏ᵗₛ₌₁ αₛ
         """
         self.alphas_cumprod = torch.cumprod(self.alphas, axis=0)
         """
@@ -123,11 +121,11 @@ class DiffusionModel(nn.Module):
         √ 1-α̅ₜ
         """
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
-        """
+        r"""
         √ 1\α̅ₜ
         """
         self.sqrt_recip_alphas_cumprod = torch.sqrt(1.0 / self.alphas_cumprod)
-        """
+        r"""
         √ 1\α̅ₜ-1
         """
         self.sqrt_recipm1_alphas_cumprod = torch.sqrt(1.0 / self.alphas_cumprod - 1)
@@ -166,7 +164,7 @@ class DiffusionModel(nn.Module):
                     torch.arange(0, ddim_steps, device=self.device) * step_ratio
                 )
             else:
-                raise "Unknown discretization method for DDIM."
+                raise ValueError("Unknown discretization method for DDIM.")
             self.ddim_alphas = (
                 self.alphas_cumprod[self.ddim_t].clone().to(torch.float32)
             )
@@ -222,7 +220,7 @@ class DiffusionModel(nn.Module):
                 )
                 x_recon = (x - sqrt_one_minus_alpha * noise) / (alpha**0.5)
             else:
-                """
+                r"""
                 x₀ = √ 1\α̅ₜ xₜ - √ 1\α̅ₜ-1 ε
                 """
                 x_recon = (
@@ -265,7 +263,7 @@ class DiffusionModel(nn.Module):
         return mu, logvar
 
     @torch.no_grad()
-    def forward(self, cond, deterministic=True):
+    def sample(self, cond, deterministic=True):
         """
         Forward pass for sampling actions. Used in evaluating pre-trained/fine-tuned policy. Not modifying diffusion clipping
 
@@ -320,7 +318,7 @@ class DiffusionModel(nn.Module):
 
     # ---------- Supervised training ----------#
 
-    def loss(self, x, *args):
+    def forward(self, x, *args):
         batch_size = len(x)
         t = torch.randint(
             0, self.denoising_steps, (batch_size,), device=x.device
