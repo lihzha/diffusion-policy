@@ -21,6 +21,7 @@ OmegaConf.register_resolver(
 
 log = logging.getLogger(__name__)
 DATA_DIR = os.environ["GDC_DATA_DIR"]
+ASSET_DIR = os.environ["GDC_ASSETS_DIR"]
 
 
 def find_pick_and_place_times(gripper_position):
@@ -92,6 +93,20 @@ def step(env):
     )
 
 
+def override_cfg(cfg, override):
+    def recursive_override(base, override):
+        for key, value in override.items():
+            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+                # Recursively update nested dictionaries
+                recursive_override(base[key], value)
+            else:
+                # Directly set the value
+                base[key] = value
+
+    # Start the override process from the root of the nested configs
+    recursive_override(cfg, override)
+
+
 @hydra.main(
     config_path=os.path.join(os.getcwd(), "guided_dc/cfg/simulation"),
     config_name="pick_and_place",
@@ -108,6 +123,34 @@ def main(cfg):
         [-0.547, -0.527, -0.143]
     )  # Position of the robot base in the global frame
     base_orientation = np.array([0, 0, np.pi / 4])
+
+    ambient_to_sample = [
+        [0.6, 0.6, 0.6],
+        [0.7, 0.7, 0.7],
+        [0.8, 0.8, 0.8],
+        [0.4, 0.4, 0.4],
+    ]
+
+    x_range = np.linspace(-0.0, -0.4, 5)
+    y_range = np.linspace(-0.25, 0.25, 5)
+
+    pear_pos_to_sample = []
+    bowl_pos_to_sample = []
+    apple_pos_to_sample = []
+
+    for x in x_range:
+        for y in y_range:
+            pear_pos_to_sample.append([x, y, 0.3, 0, 0, 0])
+            bowl_pos_to_sample.append([x, y, 0.1, 0, 0, 0])
+            apple_pos_to_sample.append([x, y, 0.1, 0, 0, 0])
+
+    distractors_to_sample = ["pear", "bowl", "apple"]
+    floor_texture_files_to_sample = [
+        f"{ASSET_DIR}/floor/medium_brown_wood.jpg",
+        f"{ASSET_DIR}/floor/dark_brown_wood.jpg",
+        f"{ASSET_DIR}/floor/light_brown_wood.jpg",
+        f"{ASSET_DIR}/floor/silver_wood.jpg",
+    ]
 
     for traj_idx in range(63, 75):
         try:
@@ -172,173 +215,243 @@ def main(cfg):
                 actions[i, -1] = 1
         print(actions[:, -1])
 
-        pick_offset = np.zeros(3)
-        place_offset = np.zeros(3)
+        for trial in range(15):
+            distractor_num_this_trial = np.random.randint(1, 3)
+            distractor_this_trial = np.random.choice(
+                distractors_to_sample, size=distractor_num_this_trial, replace=False
+            )
+            distractor_dict = []
+            for distractor in distractor_this_trial:
+                if distractor == "pear":
+                    distractor_dict.append(
+                        {
+                            "type": "custom",
+                            "obj_name": "pear",
+                            "model_file": f"{ASSET_DIR}/objects/pear.obj",
+                            "pos": pear_pos_to_sample[
+                                np.random.choice(len(pear_pos_to_sample))
+                            ],
+                            "rot": [0, 0, 0],
+                            "scale": [0.05, 0.05, 0.05],
+                        }
+                    )
+                elif distractor == "bowl":
+                    distractor_dict.append(
+                        {
+                            "type": "custom",
+                            "obj_name": "bowl",
+                            "model_file": f"{ASSET_DIR}/objects/bowl.obj",
+                            "pos": bowl_pos_to_sample[
+                                np.random.choice(len(bowl_pos_to_sample))
+                            ],
+                            "rot": [0, 0, 0],
+                            "scale": [0.01, 0.01, 0.01],
+                        }
+                    )
+                elif distractor == "apple":
+                    distractor_dict.append(
+                        {
+                            "type": "custom",
+                            "obj_name": "apple",
+                            "model_file": f"{ASSET_DIR}/objects/apple.obj",
+                            "pos": apple_pos_to_sample[
+                                np.random.choice(len(apple_pos_to_sample))
+                            ],
+                            "rot": [0, 0, 0],
+                            "scale": [0.01, 0.01, 0.01],
+                        }
+                    )
 
-        traj_start_js = actions[0, :-1]
-
-        for _ in range(2):
-            cfg.env.manip_obj.pos[:2] = [
-                float(v) for v in global_pick_pos[:2] + pick_offset[:2]
+            ambient_this_trial = ambient_to_sample[
+                np.random.choice(len(ambient_to_sample))
             ]
-            cfg.env.goal_obj.pos[:2] = [
-                float(v) for v in global_place_pos[:2] + place_offset[:2]
+            floor_texture_file_this_trial = floor_texture_files_to_sample[
+                np.random.choice(len(floor_texture_files_to_sample))
             ]
 
-            cfg.env.goal_obj.rot[1] = np.random.uniform(-np.pi, np.pi)
+            override = OmegaConf.create(
+                {
+                    "distractor": distractor_dict,
+                    "floor_texture_file": floor_texture_file_this_trial,
+                    "ambient": ambient_this_trial,
+                }
+            )
+            override_cfg(cfg, override)
 
-            # rand_range = 0.02
-            # cfg.env.manip_obj.pos[0] += np.random.uniform(-rand_range, rand_range)
-            # cfg.env.manip_obj.pos[1] += np.random.uniform(-rand_range, rand_range)
-            # cfg.env.goal_obj.pos[0] += np.random.uniform(-rand_range, rand_range)
-            # cfg.env.goal_obj.pos[1] += np.random.uniform(-rand_range, rand_range)
+            pick_offset = np.zeros(3)
+            place_offset = np.zeros(3)
 
-            env = gym.make(cfg.env.env_id, cfg=cfg.env)
-            env.reset()
-            env_start_js = env.agent.robot.get_qpos().cpu().numpy().squeeze()[:7]
-            if np.linalg.norm(traj_start_js - env_start_js) > 0.1:
-                js_to_set = np.concatenate([traj_start_js, [0.04, 0.04]])
-                env.agent.robot.set_qpos(js_to_set)
-                step(env)
+            traj_start_js = actions[0, :-1]
 
-            # 1. Save real action trajectory
-            jss = []
-            gss = []
-            wrist_imgs = []
-            side_imgs = []
-            acts = []
+            for _ in range(2):
+                cfg.env.manip_obj.pos[:2] = [
+                    float(v) for v in global_pick_pos[:2] + pick_offset[:2]
+                ]
+                cfg.env.goal_obj.pos[:2] = [
+                    float(v) for v in global_place_pos[:2] + place_offset[:2]
+                ]
 
-            success = False
-            for timestep, action in enumerate(actions):
-                if timestep == pick_obj_timestep:
-                    tcp_pos = env.agent.tcp.pose.p.cpu().numpy().squeeze()
-                    pick_offset = tcp_pos - global_pick_pos
-                if timestep == place_obj_timestep:
-                    tcp_pos = env.agent.tcp.pose.p.cpu().numpy().squeeze()
-                    place_offset = tcp_pos - global_place_pos
+                cfg.env.goal_obj.rot[1] = np.random.uniform(-np.pi, np.pi)
 
-                obs, rew, terminated, truncated, info = env.step(action)
-                success = success or terminated
-                print(action)
-                js, gs, img = process_sim_observation(obs)
-                jss.append(js)
-                gss.append(gs)
-                side_imgs.append(img["0"])
-                wrist_imgs.append(img["2"])
-                acts.append(action)
+                # rand_range = 0.02
+                # cfg.env.manip_obj.pos[0] += np.random.uniform(-rand_range, rand_range)
+                # cfg.env.manip_obj.pos[1] += np.random.uniform(-rand_range, rand_range)
+                # cfg.env.goal_obj.pos[0] += np.random.uniform(-rand_range, rand_range)
+                # cfg.env.goal_obj.pos[1] += np.random.uniform(-rand_range, rand_range)
 
-            # save_array_to_video("temp.mp4", wrist_imgs, fps=30, brg2rgb=False)
+                env = gym.make(cfg.env.env_id, cfg=cfg.env)
+                env.reset()
+                env_start_js = env.agent.robot.get_qpos().cpu().numpy().squeeze()[:7]
+                if np.linalg.norm(traj_start_js - env_start_js) > 0.1:
+                    js_to_set = np.concatenate([traj_start_js, [0.04, 0.04]])
+                    env.agent.robot.set_qpos(js_to_set)
+                    step(env)
 
-        pick_obj_pos = cfg.env.manip_obj.pos
-        place_obj_pos = cfg.env.goal_obj.pos
+                # 1. Save real action trajectory
+                jss = []
+                gss = []
+                wrist_imgs = []
+                side_imgs = []
+                acts = []
 
-        jss = np.array(jss)
-        gss = np.array(gss)
-        wrist_imgs = np.array(wrist_imgs).astype(np.uint8)
-        side_imgs = np.array(side_imgs).astype(np.uint8)
-        acts = np.array(acts)
+                success = False
+                for timestep, action in enumerate(actions):
+                    if timestep == pick_obj_timestep:
+                        tcp_pos = env.agent.tcp.pose.p.cpu().numpy().squeeze()
+                        pick_offset = tcp_pos - global_pick_pos
+                    if timestep == place_obj_timestep:
+                        tcp_pos = env.agent.tcp.pose.p.cpu().numpy().squeeze()
+                        place_offset = tcp_pos - global_place_pos
 
-        # 2. Save real observation trajectory
-        # env.reset()
-        # jss_o = []
-        # gss_o = []
-        # wrist_imgs_o = []
-        # side_imgs_o = []
-        # acts_o = []
+                    obs, rew, terminated, truncated, info = env.step(action)
+                    success = success or terminated
+                    print(action)
+                    js, gs, img = process_sim_observation(obs)
+                    jss.append(js)
+                    gss.append(gs)
+                    side_imgs.append(img["0"])
+                    wrist_imgs.append(img["2"])
+                    acts.append(action)
 
-        # real_js = real_traj_dict["observation/robot_state/joint_positions"]
-        # real_gs = real_traj_dict["observation/robot_state/gripper_position"]
-        # real_gs = 0.04 - real_gs * 0.04
-        # obs = np.concatenate([real_js, real_gs[:, None], real_gs[:, None]], axis=1)
+                # save_array_to_video("temp.mp4", wrist_imgs, fps=30, brg2rgb=False)
 
-        # for action in obs:
-        #     env.agent.robot.set_qpos(action)
-        #     obs, info = step(env)
-        #     print(action)
-        #     js, gs, img = process_sim_observation(obs)
-        #     jss_o.append(js)
-        #     gss_o.append(gs)
-        #     side_imgs_o.append(img["0"])
-        #     wrist_imgs_o.append(img["2"])
-        #     acts_o.append(action)
+            pick_obj_pos = cfg.env.manip_obj.pos
+            place_obj_pos = cfg.env.goal_obj.pos
 
-        # jss_o = np.array(jss_o)
-        # gss_o = np.array(gss_o)
-        # wrist_imgs_o = np.array(wrist_imgs_o).astype(np.uint8)
-        # side_imgs_o = np.array(side_imgs_o).astype(np.uint8)
-        # acts_o = np.array(acts_o)
+            jss = np.array(jss)
+            gss = np.array(gss)
+            wrist_imgs = np.array(wrist_imgs).astype(np.uint8)
+            side_imgs = np.array(side_imgs).astype(np.uint8)
+            acts = np.array(acts)
 
-        # 3. Save to hdf5
-        data_dict = {
-            "observation": {
-                "image": {
-                    "0": side_imgs,
-                    "2": wrist_imgs,
+            # 2. Save real observation trajectory
+            # env.reset()
+            # jss_o = []
+            # gss_o = []
+            # wrist_imgs_o = []
+            # side_imgs_o = []
+            # acts_o = []
+
+            # real_js = real_traj_dict["observation/robot_state/joint_positions"]
+            # real_gs = real_traj_dict["observation/robot_state/gripper_position"]
+            # real_gs = 0.04 - real_gs * 0.04
+            # obs = np.concatenate([real_js, real_gs[:, None], real_gs[:, None]], axis=1)
+
+            # for action in obs:
+            #     env.agent.robot.set_qpos(action)
+            #     obs, info = step(env)
+            #     print(action)
+            #     js, gs, img = process_sim_observation(obs)
+            #     jss_o.append(js)
+            #     gss_o.append(gs)
+            #     side_imgs_o.append(img["0"])
+            #     wrist_imgs_o.append(img["2"])
+            #     acts_o.append(action)
+
+            # jss_o = np.array(jss_o)
+            # gss_o = np.array(gss_o)
+            # wrist_imgs_o = np.array(wrist_imgs_o).astype(np.uint8)
+            # side_imgs_o = np.array(side_imgs_o).astype(np.uint8)
+            # acts_o = np.array(acts_o)
+
+            # 3. Save to hdf5
+            data_dict = {
+                "observation": {
+                    "image": {
+                        "0": side_imgs,
+                        "2": wrist_imgs,
+                    },
+                    "robot_state": {
+                        "joint_positions": jss,
+                        "gripper_position": gss.squeeze(),
+                    },
                 },
-                "robot_state": {
-                    "joint_positions": jss,
-                    "gripper_position": gss.squeeze(),
+                "action": {
+                    "joint_position": acts[:, :-1],
+                    "gripper_position": acts[:, -1],
                 },
-            },
-            "action": {
-                "joint_position": acts[:, :-1],
-                "gripper_position": acts[:, -1],
-            },
-            "pick_obj_pos": pick_obj_pos,
-            "place_obj_pos": place_obj_pos,
-            "pick_obj_timestep": pick_obj_timestep,
-            "place_obj_timestep": place_obj_timestep,
-            # "observation_o": {
-            #     "image": {
-            #         "0": side_imgs_o,
-            #         "2": wrist_imgs_o,
-            #     },
-            #     "robot_state": {
-            #         "joint_positions": jss_o,
-            #         "gripper_position": gss_o.squeeze(),
-            #     },
-            # },
-            # "action_o": {
-            #     "joint_position": acts_o[:, :-1],
-            #     "gripper_position": acts_o[:, -1],
-            # },
-        }
+                "pick_obj_pos": pick_obj_pos,
+                "place_obj_pos": place_obj_pos,
+                "pick_obj_timestep": pick_obj_timestep,
+                "place_obj_timestep": place_obj_timestep,
+                # "observation_o": {
+                #     "image": {
+                #         "0": side_imgs_o,
+                #         "2": wrist_imgs_o,
+                #     },
+                #     "robot_state": {
+                #         "joint_positions": jss_o,
+                #         "gripper_position": gss_o.squeeze(),
+                #     },
+                # },
+                # "action_o": {
+                #     "joint_position": acts_o[:, :-1],
+                #     "gripper_position": acts_o[:, -1],
+                # },
+            }
+            # Add override to the data_dict
+            data_dict["override"] = OmegaConf.to_container(override)
 
-        os.makedirs(f"{DATA_DIR}/sim/{real_folder}", exist_ok=True)
-        # if os.path.exists(f"{DATA_DIR}/sim/{traj_idx}_sim.h5"):
-        #     os.path.remove(f"{DATA_DIR}/sim/{traj_idx}_sim.h5")
-        if not success:
-            save_dict_to_hdf5(
-                f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim_failed.h5", data_dict
-            )
-            a = load_sim_hdf5(
-                f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim_failed.h5", load_o=False
-            )[0]
-        else:
-            save_dict_to_hdf5(
-                f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim.h5", data_dict
-            )
-            a = load_sim_hdf5(
-                f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim.h5", load_o=False
-            )[0]
+            os.makedirs(f"{DATA_DIR}/sim/{real_folder}", exist_ok=True)
+            # if os.path.exists(f"{DATA_DIR}/sim/{traj_idx}_sim.h5"):
+            #     os.path.remove(f"{DATA_DIR}/sim/{traj_idx}_sim.h5")
+            if not success:
+                save_dict_to_hdf5(
+                    f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_{trial}_sim_failed.h5",
+                    data_dict,
+                )
+                a = load_sim_hdf5(
+                    f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_{trial}_sim_failed.h5",
+                    load_o=False,
+                )[0]
+            else:
+                save_dict_to_hdf5(
+                    f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_{trial}_sim.h5", data_dict
+                )
+                a = load_sim_hdf5(
+                    f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_{trial}_sim.h5",
+                    load_o=False,
+                )[0]
 
-        videos_1 = a["observation/image/0"]
-        videos_2 = a["observation/image/2"]
-        if not success:
-            stack_videos_horizontally(
-                videos_1,
-                videos_2,
-                f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim_failed.mp4",
-            )
-        else:
-            stack_videos_horizontally(
-                videos_1, videos_2, f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim.mp4"
-            )
-        # video_1 = a["observation_o/image/0"]
-        # video_2 = a["observation_o/image/2"]
-        # stack_videos_horizontally(
-        #     video_1, video_2, f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim_o.mp4"
-        # )
+            videos_1 = a["observation/image/0"]
+            videos_2 = a["observation/image/2"]
+            if not success:
+                stack_videos_horizontally(
+                    videos_1,
+                    videos_2,
+                    f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_{trial}_sim_failed.mp4",
+                )
+            else:
+                stack_videos_horizontally(
+                    videos_1,
+                    videos_2,
+                    f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_{trial}_sim.mp4",
+                )
+            # video_1 = a["observation_o/image/0"]
+            # video_2 = a["observation_o/image/2"]
+            # stack_videos_horizontally(
+            #     video_1, video_2, f"{DATA_DIR}/sim/{real_folder}/{traj_idx}_sim_o.mp4"
+            # )
 
     env.close()
 

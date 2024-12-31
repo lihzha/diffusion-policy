@@ -44,6 +44,15 @@ class EvalAgentSim(EvalAgent):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
 
+        # self.dataset = np.load(
+        #     "data/jsg_jsg_2cam_192__sim_1.0/dataset.npz", allow_pickle=True
+        # )
+        # self.states = self.dataset["states"]
+        # self.images = self.dataset["images"].item()
+        # self.actions = self.dataset["actions"]
+        # self.action_timestep = list(range(0, len(self.actions), self.act_steps))
+        # self.state_timestep = list(range(0, len(self.states), self.act_steps))
+
     def predict_single_step(self, obs, camera_indices=["0", "2"], bgr2rgb=False):
         self.model.eval()
         with torch.no_grad():
@@ -230,6 +239,8 @@ class EvalAgentSim(EvalAgent):
         # Run
         # cond_states = []
         # images = [[], []]
+        # true_cond_states = []
+        # true_images = [[], []]
         # actions = []
         # robot_states = [
         #     np.concatenate(
@@ -240,7 +251,10 @@ class EvalAgentSim(EvalAgent):
         #         axis=1,
         #     )
         # ]
+        # camera_indices = [0, 2]
+        # current_gripper = 1.0
         try:
+            # for step in range(200, 10000):
             for step in range(self.n_steps):
                 if step % 10 == 0:
                     print(f"Processed step {step} of {self.n_steps}")
@@ -259,9 +273,36 @@ class EvalAgentSim(EvalAgent):
                         prev_obs=prev_obs,
                         bgr2rgb=False,
                     )
+                    # cv2.imwrite(
+                    #     f"image_{camera_indices[1]}.png",
+                    #     cond["rgb"][camera_indices[1]]
+                    #     .squeeze()
+                    #     .cpu()
+                    #     .numpy()
+                    #     .transpose(1, 2, 0)
+                    #     .astype(np.uint8),
+                    # )
+                    # cond["state"] = torch.tensor(
+                    #     self.states[self.state_timestep[step]]
+                    # )[None, :].to(self.device)
+                    # cond["rgb"] = {
+                    #     i: torch.tensor(self.images[i][self.state_timestep[step]])[
+                    #         None, :
+                    #     ][None, :].to(self.device)
+                    #     for i in camera_indices
+                    # }
+
                     # cond_states.append(cond["state"].cpu().numpy())
                     # for i, k in enumerate(cond["rgb"].keys()):
                     #     images[i].append(cond["rgb"][k].cpu().numpy())
+
+                    # true_cond_states.append(
+                    #     self.states[self.state_timestep[step]][None, :]
+                    # )
+                    # for i, k in enumerate(cond["rgb"].keys()):
+                    #     true_images[i].append(
+                    #         self.images[int(k)][self.state_timestep[step]][None, :]
+                    #     )
 
                     pre_obs_end_time = time.time()
                     print(f"Pre-obs time: {pre_obs_end_time - pre_obs_start_time}")
@@ -273,6 +314,11 @@ class EvalAgentSim(EvalAgent):
                         .numpy()
                     )
                     naction = samples[:, : self.act_steps]  # remove batch dimension
+                    # naction = self.actions[
+                    #     self.action_timestep[step] : self.action_timestep[step]
+                    #     + self.act_steps
+                    # ][None, :]
+                    # print("Action chunk:", naction)
                 if self.use_delta_actions:
                     cur_state = self.unnormalize_obs(cond["state"].cpu().numpy())
                     action = self.unnormalized_sim_delta_action(naction, cur_state)
@@ -292,6 +338,31 @@ class EvalAgentSim(EvalAgent):
                     a = action[:, action_step]
                     prev_obs = obs
                     step_start_time = time.time()
+
+                    # if a[..., -1] != current_gripper:
+                    #     print(a[..., -1].item(), current_gripper)
+                    #     breakpoint()
+                    #     current_gripper = a[..., -1].item()
+                    #     step_start_time = time.time()
+                    #     for _ in range(50):
+                    #         obs, rew, terminated, truncated, info = self.env.step(a)
+                    #         env_states, env_success = update(
+                    #             env_states,
+                    #             env_success,
+                    #             terminated.cpu(),
+                    #             info,
+                    #             eval_step=step,
+                    #         )
+                    #         self.env.render()
+                    #         step_end_time = time.time()
+                    #         print(f"Step time: {step_end_time - step_start_time}")
+                    #         if a[..., -1].item() == 1.0:
+                    #             print("Opening gripper")
+                    #         else:
+                    #             print("Closing gripper")
+                    #     obs = self.process_sim_observation(obs)
+                    #     breakpoint()
+                    #     break
 
                     # a = np.concatenate([a, a[..., -1:]], axis=1)
                     # a[..., -2:] = (a[..., -2:] + 1) * 0.02
@@ -322,13 +393,12 @@ class EvalAgentSim(EvalAgent):
         except KeyboardInterrupt:
             print("Interrupted by user")
 
-        return env_states
-
-        # # Save data
         # np.savez_compressed(
-        #     self.result_path,
-        #     actions=np.array(actions),
-        #     robot_states=np.array(robot_states),
+        #     "val.npz",
         #     cond_states=np.array(cond_states),
         #     images=np.array(images),
+        #     true_cond_states=np.array(true_cond_states),
+        #     true_images=np.array(true_images),
         # )
+
+        return env_states

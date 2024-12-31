@@ -77,7 +77,7 @@ class ValAgentReal(ValAgent):
             batch = batch_apply(batch, lambda x: x.to(self.device, non_blocking=True))
             batch = batch_apply(batch, lambda x: x.float())
 
-            los = self.model.loss(*batch)
+            los = self.model.forward(*batch)
             losses.append(los.item())
 
             predicted_action = (
@@ -94,7 +94,7 @@ class ValAgentReal(ValAgent):
             predicted_action_unnorms.append(predicted_action_unnorm)
             true_action_unnorms.append(true_action_unnorm)
 
-            # breakpoint()
+            breakpoint()
 
             print(f"Batch {i} - Loss: {los.item()}")
             if i == num_steps:

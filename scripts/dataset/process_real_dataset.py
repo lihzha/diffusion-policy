@@ -517,7 +517,8 @@ def process_real_dataset_with_sim_data(
 
                 # Change BGR (cv2 default) to RGB
                 if bgr2rgb:
-                    resized_img = resized_img[:, [2, 1, 0]]
+                    if "sim" not in traj_path:
+                        resized_img = resized_img[:, [2, 1, 0]]
 
                 if use_obs_as_action:
                     resized_img = resized_img[:-1]

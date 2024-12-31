@@ -30,7 +30,7 @@ sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode="w", buffering=1)
 
 
-CKPT_PATH = "/home/lab/guided-data-collection/ckpts"
+CKPT_PATH = "/home/irom-lab/projects/guided-data-collection/ckpts"
 
 
 def main():

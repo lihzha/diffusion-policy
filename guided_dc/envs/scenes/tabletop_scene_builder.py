@@ -2,25 +2,33 @@ import os
 from typing import List
 
 import numpy as np
+import objaverse
 import sapien
 import sapien.render
 import torch
 from mani_skill.agents.multi_agent import MultiAgent
 from mani_skill.utils.building.ground import build_ground
 from mani_skill.utils.scene_builder import SceneBuilder
+from mani_skill.utils.structs import Actor
+from sapien.render import RenderMaterial
 from transforms3d.euler import euler2quat
 
 
-# TODO (stao): make the build and initialize api consistent with other scenes
 class TabletopSceneBuilder(SceneBuilder):
     def __init__(self, env, cfg, robot_init_qpos_noise=0.02):
         super().__init__(env=env, robot_init_qpos_noise=robot_init_qpos_noise)
-        self.table_model_file = cfg.table_model_file
+        self.cfg = cfg
+        self.table_model_file = cfg.table.model_file
         self.floor_texture_file = cfg.floor_texture_file
-        self.table_scale = cfg.table_scale
         self.robot_init_qpos = cfg.robot_init_qpos
         self.robot_init_pos = cfg.robot_init_pos
         self.robot_init_euler = cfg.robot_init_rot
+        self.table_height = cfg.table.table_height
+
+        # Instead of moving the table, move the robot and the background
+        self.robot_init_pos = np.array(self.robot_init_pos) + np.array(
+            [0, 0, -self.table_height]
+        )
 
         if os.path.isdir(self.table_model_file):
             table_model_files = [
@@ -40,15 +48,15 @@ class TabletopSceneBuilder(SceneBuilder):
             )
 
     def build_background(self):
-        background_file = "guided_dc/assets/background/background_full.obj"
         builder = self.scene.create_actor_builder()
+        p = np.array(self.cfg.background.pos) + np.array([0, 0, -self.table_height])
         background_pose = sapien.Pose(
-            p=[0.04, -0.39, -0.105],
+            p=p,
             # p=[0.07, -0.28, -0.12],
-            q=euler2quat(0, 0, 0),
+            q=euler2quat(*self.cfg.background.rot),
         )
         builder.add_visual_from_file(
-            filename=background_file,
+            filename=self.cfg.background.model_file,
             scale=[1] * 3,
             pose=background_pose,
         )
@@ -57,71 +65,147 @@ class TabletopSceneBuilder(SceneBuilder):
         self.scene_objects.append(background)
 
     def build(self):
+        # 1. Build the table
         builder = self.scene.create_actor_builder()
         table_pose = sapien.Pose(p=[0, 0, 0], q=[1, 0, 0, 0])
+        # Always set table scale to 1
         builder.add_nonconvex_collision_from_file(
             filename=self.table_model_file,
-            scale=[self.table_scale] * 3,
+            scale=[1.0] * 3,
             pose=table_pose,
         )
-
-        # builder.add_box_collision(         # TODO: Table-specific, but potentially faster.
-        #     pose=sapien.Pose(p=[0, 0, 2+0.05/2-0.1]),
-        #     half_size=(4 / 2, 2 / 2, 0.05 / 2),
+        # builder.add_box_collision(  # TODO: Table-specific, but potentially faster.
+        #     pose=sapien.Pose(p=[0, 0, -0.025]),
+        #     half_size=(0.7, 0.3575, 0.025),
         # )
 
         builder.add_visual_from_file(
             filename=self.table_model_file,
-            scale=[self.table_scale] * 3,
+            scale=[1.0] * 3,
             pose=table_pose,
             material=self._get_table_material(),
         )
         builder.initial_pose = table_pose
-
         table = builder.build_kinematic(name="table-workspace")
-        aabb = (
-            table._objs[0]
-            .find_component_by_type(sapien.render.RenderBodyComponent)
-            .compute_global_aabb_tight()
-        )
-        self.table_length = aabb[1, 0] - aabb[0, 0]
-        self.table_width = aabb[1, 1] - aabb[0, 1]
-        self.table_height = aabb[1, 2] - aabb[0, 2]
-
-        print(self.table_length, self.table_width)
-
-        # TODO: Table-specific
-        self.table_thickness = 0.05 * self.table_scale
+        # aabb = (
+        #     table._objs[0]
+        #     .find_component_by_type(sapien.render.RenderBodyComponent)
+        #     .compute_global_aabb_tight()
+        # )
+        # self.table_length = aabb[1, 0] - aabb[0, 0]
+        # self.table_width = aabb[1, 1] - aabb[0, 1]
+        # self.table_height = aabb[1, 2] - aabb[0, 2]
+        # print(self.table_length, self.table_width)
+        # self.table_thickness = self.cfg.table.thickness
 
         floor_width = 100
         if self.scene.parallel_in_single_scene:
             floor_width = 500
+
+        # 2. Build the ground
         self.ground = build_ground(
             self.scene,
             floor_width=floor_width,
-            altitude=-self.table_height,
+            altitude=-self.cfg.table.thickness - self.cfg.table.leg_length,
             texture_file=self.floor_texture_file,
         )
         self.table = table
         self.scene_objects: List[sapien.Entity] = [self.table, self.ground]
 
+        # 3. Build the background
         self.build_background()
 
+        # 4. Build distractor objects
+        self.build_distractor()
+
+    def build_distractor(self):
+        for cfg in self.cfg.distractor:
+            if cfg.type == "objaverse":
+                lvis_annotations = objaverse.load_lvis_annotations()
+                uids_to_load = lvis_annotations[cfg.obj_name]
+                # processes = multiprocessing.cpu_count()
+                obj_dicts = objaverse.load_objects(
+                    uids=uids_to_load, download_processes=1
+                )
+                asset_path_list = list(obj_dicts.values())
+                rand_idx = torch.randperm(len(asset_path_list))
+                rand_idx = [0, 1, 2, 3]
+                model_files = [asset_path_list[idx] for idx in rand_idx]
+                model_files = np.concatenate(
+                    [model_files]
+                    * np.ceil(self.env.num_envs / len(asset_path_list)).astype(int)
+                )[: self.env.num_envs]
+                if (
+                    self.env.num_envs > 1
+                    and self.env.num_envs < len(asset_path_list)
+                    and self.env.reconfiguration_freq <= 0
+                ):
+                    print(
+                        """There are less parallel environments than total available models to sample.
+                        Not all models will be used during interaction even after resets unless you call env.reset(options=dict(reconfigure=True))
+                        or set reconfiguration_freq to be > 1."""
+                    )
+            elif cfg.type == "custom":
+                model_files = [cfg.model_file] * self.env.num_envs
+            else:
+                raise ValueError(f"Unknown object type for distractors: {cfg.type}")
+            _objs: List[Actor] = []
+            for i, model_file in enumerate(model_files):
+                # TODO: before official release we will finalize a metadata dataclass that these build functions should return.
+                builder = self.scene.create_actor_builder()
+                builder.set_scene_idxs([i])
+
+                distractor_pose = sapien.Pose(
+                    p=cfg.pos,
+                    q=euler2quat(*cfg.rot),
+                )
+
+                builder.add_nonconvex_collision_from_file(
+                    filename=model_file,
+                    scale=cfg.scale,
+                    pose=distractor_pose,
+                    # material=None,
+                )
+                builder.add_visual_from_file(
+                    filename=model_file,
+                    scale=cfg.scale,
+                    pose=distractor_pose,
+                    # material=None,
+                )
+                builder.initial_pose = distractor_pose
+
+                _objs.append(
+                    builder.build_kinematic(name=f"distractor-{cfg.obj_name}-{i}")
+                )
+                self.scene.remove_from_state_dict_registry(_objs[-1])
+            distractor = Actor.merge(_objs, name=f"distractor-{cfg.obj_name}")
+            self.scene.add_to_state_dict_registry(distractor)
+            aabb = (
+                distractor._objs[0]
+                .find_component_by_type(sapien.render.RenderBodyComponent)
+                .compute_global_aabb_tight()
+            )
+            length = aabb[1, 0] - aabb[0, 0]
+            w = aabb[1, 1] - aabb[0, 1]
+            h = aabb[1, 2] - aabb[0, 2]
+            print(length, w, h)
+            breakpoint()
+            self.scene_objects.append(distractor)
+
     def _get_table_material(self):
-        # Create a material object
-        from sapien.render import RenderMaterial, RenderTexture2D
+        from sapien.render import RenderTexture2D
 
         table_material = RenderMaterial()
         table_material.base_color_texture = RenderTexture2D(
-            filename="guided_dc/assets/table/material_0.png",
+            filename=self.cfg.table.material_file,
             srgb=True,
         )
         table_material.diffuse_texture = RenderTexture2D(
-            filename="guided_dc/assets/table/material_0.png",
+            filename=self.cfg.table.material_file,
             srgb=True,
         )
         # table_material.roughness_texture = RenderTexture2D(
-        #     filename="guided_dc/assets/table/material_0.png",
+        #     filename=self.cfg.table.material_file,
         #     srgb=False,
         # )
         # Emission texture

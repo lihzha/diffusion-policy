@@ -150,6 +150,7 @@ def main():
     #         viewer.paused = env_cfg.pause
 
     cfg.n_steps = 120
+    cfg.act_steps = 6
 
     cls = hydra.utils.get_class(cfg._target_)
     agent = cls(cfg, env)

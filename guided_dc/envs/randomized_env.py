@@ -3,14 +3,14 @@ from pathlib import Path
 from typing import List
 
 import numpy as np
+import objaverse
 import sapien
 import sapien.physx as physx
 import torch
 from mani_skill.envs.sapien_env import BaseEnv
 from mani_skill.sensors.camera import CameraConfig
 from mani_skill.utils import sapien_utils
-from mani_skill.utils.structs import Pose
-from mani_skill.utils.structs.actor import Actor
+from mani_skill.utils.structs import Actor, Pose
 from mani_skill.utils.structs.types import GPUMemoryConfig, SimConfig
 from sapien.render import RenderMaterial
 from transforms3d.euler import euler2quat
@@ -213,6 +213,9 @@ class RandEnv(BaseEnv):
     def lighting(self):
         return {"ambient": self.scene.ambient_light.copy()}
 
+    def set_ambient_light(self, ambient_light):
+        self.scene.set_ambient_light(ambient_light)
+
     def randomize_lighting(self):
         """
         Randomizes the lighting based on the configuration provided in `self.rand_cfg.lighting`.
@@ -229,7 +232,7 @@ class RandEnv(BaseEnv):
             ambient_light = randomize_array(
                 **self.rand_cfg.lighting.ambient, base=current_ambient_light
             )
-            self.scene.set_ambient_light(ambient_light)
+            self.set_ambient_light(ambient_light)
         log.info("Randomizing lighting. Only ambient light is supported for now.")
         return ambient_light
 
@@ -382,7 +385,7 @@ class RandEnv(BaseEnv):
         #     color=[1, 1, 1],
         # )
         # self.scene.add_point_light(position=[0, 0, 0], color=[1, 1, 1])
-        self.scene.set_ambient_light([0.6, 0.6, 0.6])
+        self.scene.set_ambient_light(self.cfg.lighting.ambient)
         # self.scene.add_directional_light(
         #     [0, 0.0, -1],
         #     [0.9, 0.9, 0.9],
@@ -462,6 +465,68 @@ class RandEnv(BaseEnv):
             )
         elif asset_type == "ai2thor":
             return self._load_ai2thor_assets(obj_name, physic_material, visual_material)
+        elif asset_type == "objaverse":
+            return self._load_objaverse_assets(
+                obj_name, physic_material, visual_material, scale
+            )
+
+    def _load_objaverse_assets(
+        self, obj_name, material=None, visual_material=None, scale=[1, 1, 1]
+    ):
+        lvis_annotations = objaverse.load_lvis_annotations()
+        uids_to_load = lvis_annotations[obj_name]
+        # processes = multiprocessing.cpu_count()
+        obj_dicts = objaverse.load_objects(uids=uids_to_load, download_processes=1)
+        asset_path_list = list(obj_dicts.values())
+
+        rand_idx = torch.randperm(len(asset_path_list))
+        model_files = [asset_path_list[idx] for idx in rand_idx]
+        model_files = np.concatenate(
+            [model_files] * np.ceil(self.num_envs / len(asset_path_list)).astype(int)
+        )[: self.num_envs]
+        if (
+            self.num_envs > 1
+            and self.num_envs < len(asset_path_list)
+            and self.reconfiguration_freq <= 0
+        ):
+            print(
+                """There are less parallel environments than total available models to sample.
+                Not all models will be used during interaction even after resets unless you call env.reset(options=dict(reconfigure=True))
+                or set reconfiguration_freq to be > 1."""
+            )
+
+        _objs: List[Actor] = []
+        for i, model_file in enumerate(model_files):
+            # TODO: before official release we will finalize a metadata dataclass that these build functions should return.
+            model_name = Path(model_file).name
+            builder = self.scene.create_actor_builder()
+            builder.set_scene_idxs([i])
+
+            obj_pose = sapien.Pose(q=euler2quat(0, 0, 0))
+
+            if material is not None:
+                builder.add_convex_collision_from_file(
+                    filename=model_file, scale=scale, pose=obj_pose, material=material
+                )
+            else:
+                print(f"Using default physical properties for the object {model_name}.")
+                builder.add_convex_collision_from_file(
+                    filename=model_file, scale=scale, pose=obj_pose
+                )
+
+            builder.add_visual_from_file(
+                filename=model_file,
+                scale=scale,
+                pose=obj_pose,
+                material=visual_material,
+            )
+            builder.initial_pose = obj_pose
+
+            _objs.append(builder.build(name=f"{model_name}-{i}"))
+            self.remove_from_state_dict_registry(_objs[-1])
+        obj = Actor.merge(_objs, name=f"{obj_name}")
+        self.add_to_state_dict_registry(obj)
+        return obj, _objs
 
     def _load_ai2thor_assets(
         self, obj_name, material=None, visual_material=None, scale=[1, 1, 1]

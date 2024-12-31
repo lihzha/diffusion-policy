@@ -130,6 +130,10 @@ class EvalAgent:
         gripper_state = raw_obs[0]["agent"]["qpos"][:, 7:8].cpu().numpy()
         assert (gripper_state <= 0.04).all(), gripper_state
         gripper_state = 1 - gripper_state / 0.04  # 1 is closed, 0 is open
+        if gripper_state > 0.2:
+            gripper_state = 1.0
+        else:
+            gripper_state = 0.0
 
         eef_pos_quat = raw_obs[0]["extra"]["tcp_pose"].cpu().numpy()
         # conver quaternion to euler angles
@@ -194,6 +198,13 @@ class EvalAgent:
 
     def postprocess_sim_gripper_action(self, action):
         action[..., -1] = -(action[..., -1] * 2 - 1)
+        action[..., -1] = (action[..., -1] > 0).astype(np.float32) * 2 - 1
+        # print(action[..., -1])
+        # print((action[..., -1] > 0).sum())
+        if (action[..., -1] > 0).sum() > 4:
+            action[..., -1] = 1
+        else:
+            action[..., -1] = -1
         return action
 
     def process_multistep_state(self, obs, prev_obs=None):
@@ -217,10 +228,10 @@ class EvalAgent:
 
         # TODO: use config
         # round gripper positionc
-        if ret[..., -1] <= 0:
-            ret[..., -1] = -1
-        else:
-            ret[..., -1] = 1
+        # if ret[..., -1] <= 0:
+        #     ret[..., -1] = -1
+        # else:
+        #     ret[..., -1] = 1
         # ret[..., -1] = torch.round(ret[..., -1])
         return ret
 

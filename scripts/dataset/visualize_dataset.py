@@ -81,18 +81,26 @@ def load_dataset(dataset_folder):
     print("State max:", np.max(states, axis=0))
     print("State min:", np.min(states, axis=0))
 
-    fig, ax = plt.subplots(4, 2, figsize=(10, 10))
-    for i in range(8):
-        ax[i // 2, i % 2].plot(states[:, i], label=f"State {i}")
-        ax[i // 2, i % 2].plot(actions[:, i], label=f"Action {i}")
-        ax[i // 2, i % 2].legend()
-    plt.savefig(os.path.join(dataset_folder, "actions_states.png"))
+    # fig, ax = plt.subplots(4, 2, figsize=(10, 10))
+    # for i in range(8):
+    #     ax[i // 2, i % 2].plot(states[:, i], label=f"State {i}")
+    #     ax[i // 2, i % 2].plot(actions[:, i], label=f"Action {i}")
+    #     ax[i // 2, i % 2].legend()
+    # plt.savefig(os.path.join(dataset_folder, "actions_states.png"))
+    plt.plot(actions[:, -1], label="State 0")
+    plt.savefig(os.path.join(dataset_folder, "gripper.png"))
 
     # 2. Visualize images
-    k = 1000
+    # k = 0
+    # stack_videos_horizontally(
+    #     *[images[i][k : k + 1000].transpose(0, 2, 3, 1) for i in camera_indices],
+    #     os.path.join(dataset_folder, "real_images.mp4"),
+    #     bgr2rgb=bgr2rgb,
+    # )
+    k = 0
     stack_videos_horizontally(
-        *[images[i][k : k + 200].transpose(0, 2, 3, 1) for i in camera_indices],
-        os.path.join(dataset_folder, "images.mp4"),
+        *[images[i][k : k + 5000].transpose(0, 2, 3, 1) for i in camera_indices],
+        os.path.join(dataset_folder, "sim_images.mp4"),
         bgr2rgb=bgr2rgb,
     )
 

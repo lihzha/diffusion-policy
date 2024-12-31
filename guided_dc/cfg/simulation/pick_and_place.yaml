@@ -17,18 +17,43 @@ env:
   shader: rt  # minimal, default, rt
 
   scene_builder:
-    table_model_file: ${oc.env:GDC_ASSETS_DIR}/table/table_with_textured_top.obj
-    floor_texture_file: ${oc.env:GDC_ASSETS_DIR}/floor
-    table_scale: 1
+    floor_texture_file: ${oc.env:GDC_ASSETS_DIR}/floor/silver_wood.jpg
     robot_init_qpos: [0, -0.62831853, 0, -2.51327412, 0, 1.88495559, 0, 0.04, 0.04]
     robot_init_pos: [-0.547, -0.527, -0.143]
     robot_init_rot: [0, 0, "${pi_op:div,4}"]
     table:
+      model_file: ${oc.env:GDC_ASSETS_DIR}/table/table_with_textured_top.obj
+      material_file: ${oc.env:GDC_ASSETS_DIR}/table/material_0.png
+      table_height: 0.0
+      # for building table
       thickness: 0.05  # in meters
       width: 0.715   # in meters
       length: 1.4   # in meters
       leg_length: 0.75
       leg_thickness: 0.05
+    background:
+      model_file: ${oc.env:GDC_ASSETS_DIR}/background/background_full.obj
+      pos: [0.04, -0.39, -0.105]
+      rot: [0, 0, 0]
+    distractor:
+      # - type: custom
+      #   obj_name: pear
+      #   model_file: ${oc.env:GDC_ASSETS_DIR}/objects/pear.glb
+      #   pos: [-0.1, 0.025, 0.3]
+      #   rot: [0,0,0]
+      #   scale: [0.05, 0.05, 0.05]
+      - type: custom
+        obj_name: bowl
+        model_file: ${oc.env:GDC_ASSETS_DIR}/objects/bowl.glb
+        pos: [-0.3, 0.025, 0.1]
+        rot: [0,0,0]
+        scale: [0.01, 0.01, 0.01]
+      # - type: custom
+      #   obj_name: apple
+      #   model_file: ${oc.env:GDC_ASSETS_DIR}/objects/apple.glb
+      #   pos: [-0.1, 0.025, 0.15]
+      #   rot: [0, 0, 0]
+      #   scale: [0.01, 0.01, 0.01]
 
   camera:
     wrist_camera:
@@ -49,12 +74,12 @@ env:
         # - [217.267, 0., 214.218]
         # - [0. , 216.97, 122.577]
         # - [0.0, -0.0, 1.]
-        # - [454.5, 0., 324.4]
-        # - [0. , 433.9, 245.2]
-        # - [0.0, -0.0, 1.]
-        - [391.04746246430125, 0.0, 326.98570796916977]
-        - [0.0, 391.07204451229177, 242.77958105302346]
-        - [0.0, 0.0, 1.0]
+        - [454.5, 0., 324.4]
+        - [0. , 433.9, 245.2]
+        - [0.0, -0.0, 1.]
+        # - [391.04746246430125, 0.0, 326.98570796916977]
+        # - [0.0, 391.07204451229177, 242.77958105302346]
+        # - [0.0, 0.0, 1.0]
     sensor:
       eye:
         - [-1, 1, 0.5]
@@ -102,8 +127,8 @@ env:
 
   manip_obj:   #TODO: enable different objects to different subscenes
     type: custom # custom, ai2thor
-    filepath: ${oc.env:GDC_ASSETS_DIR}/uploads_files_4564576_Tomato.glb
-    pos: [-0.4,0.03,0] # for 40.h5
+    filepath: ${oc.env:GDC_ASSETS_DIR}/objects/tomato.glb
+    pos: [-0.3,0.1,0] # for 40.h5
     # pos: [-0.4,0.1,0.0]
     # pos: [-0.45,-0.1,0]
     rot: [-1.57265, -0.0464526,  3.0965]
@@ -120,10 +145,10 @@ env:
 
   goal_obj:
     type: custom # custom, ai2thor
-    filepath: ${oc.env:GDC_ASSETS_DIR}/Stainless_Steel_Pan_w_1215234136_texture.glb
+    filepath: ${oc.env:GDC_ASSETS_DIR}/objects/plate.glb
     # obj_name: plate
     # pos: [-0.35,0.1,0.0083]  # for 40.h5
-    pos: [-0.21,0.025,0.01]
+    pos: [-0.5,0.025,0.01]
     # pos: [-0.25,0.1,0]
     rot: [1.569,2.9,-0.001066]
     scale: [0.1,0.08,0.1]
@@ -137,6 +162,9 @@ env:
       # metallic: 1.0
       # roughness: 0.1
       # emission: [0., 0., 0., 0.]
+
+  lighting:
+    ambient: [0.6, 0.6, 0.6]
 
   grasp:
     num_action_candidates: 1
@@ -197,12 +225,19 @@ env:
         distribution: "uniform"
 
     camera:
-      rot:
+      pos:
         value_range:
           - [0.0, 0.0]
           - [0.0, 0.0]
           - [0.0, 0.0]
-        operation: "absolute"
+        operation: "additive"
+        distribution: "uniform"
+      rot:
+        value_range:
+          - [-0.1, 0.1]
+          - [-0.1, 0.1]
+          - [-0.1, 0.1]
+        operation: "additive"
         distribution: "uniform"
 
     lighting:

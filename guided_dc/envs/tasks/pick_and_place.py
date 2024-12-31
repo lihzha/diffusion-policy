@@ -122,6 +122,20 @@ class PickAndPlace(RandEnv):
                 # xyz[:, 2] = merged_obj.height
                 # merged_obj.set_pose(Pose.create_from_pq(p=xyz, q=[1,0,0,0]))
 
+    def set_pick_obj_pose(self, pose: list, use_euler: bool = False):
+        if use_euler:
+            q = euler2quat(pose[3], pose[4], pose[5])
+        else:
+            q = pose[3:]
+        self.manip_obj.set_pose(Pose.create_from_pq(p=pose[:3], q=q))
+
+    def set_place_obj_pose(self, pose: list, use_euler: bool = False):
+        if use_euler:
+            q = euler2quat(pose[3], pose[4], pose[5])
+        else:
+            q = pose[3:]
+        self.goal_obj.set_pose(Pose.create_from_pq(p=pose[:3], q=q))
+
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         # use the torch.device context manager to automatically create tensors on CPU or CUDA depending on self.device, the device the environment runs on
         with torch.device(self.device):
