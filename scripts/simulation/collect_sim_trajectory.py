@@ -9,6 +9,7 @@ from scipy.spatial.transform import Rotation as R
 
 from guided_dc.utils.hdf5_utils import save_dict_to_hdf5
 from guided_dc.utils.io_utils import load_hdf5, load_sim_hdf5, stack_videos_horizontally
+import omegaconf
 
 OmegaConf.register_resolver(
     "pi_op",
@@ -94,18 +95,22 @@ def step(env):
 
 
 def override_cfg(cfg, override):
-    def recursive_override(base, override):
-        for key, value in override.items():
-            if isinstance(value, dict) and key in base and isinstance(base[key], dict):
-                # Recursively update nested dictionaries
-                recursive_override(base[key], value)
-            else:
-                # Directly set the value
-                base[key] = value
-
-    # Start the override process from the root of the nested configs
-    recursive_override(cfg, override)
-
+    
+    def find_and_set_key(d, target_key, value):
+        if not isinstance(d, omegaconf.dictconfig.DictConfig):
+            return False
+        
+        for key in d:
+            if key == target_key:
+                d[key] = value
+                return True
+            if isinstance(d[key], omegaconf.dictconfig.DictConfig):
+                if find_and_set_key(d[key], target_key, value):
+                    return True
+        return False
+    
+    for k, v in override.items():
+        find_and_set_key(cfg, k, v)
 
 @hydra.main(
     config_path=os.path.join(os.getcwd(), "guided_dc/cfg/simulation"),
@@ -131,8 +136,8 @@ def main(cfg):
         [0.4, 0.4, 0.4],
     ]
 
-    x_range = np.linspace(-0.0, -0.4, 5)
-    y_range = np.linspace(-0.25, 0.25, 5)
+    x_range = np.linspace(-0.1, 0.2, 4)
+    y_range = np.linspace(-0.15, 0.15, 3)
 
     pear_pos_to_sample = []
     bowl_pos_to_sample = []
@@ -140,9 +145,11 @@ def main(cfg):
 
     for x in x_range:
         for y in y_range:
-            pear_pos_to_sample.append([x, y, 0.3, 0, 0, 0])
-            bowl_pos_to_sample.append([x, y, 0.1, 0, 0, 0])
-            apple_pos_to_sample.append([x, y, 0.1, 0, 0, 0])
+            x = float(x)
+            y = float(y)
+            pear_pos_to_sample.append([x, y, 0.3])
+            bowl_pos_to_sample.append([x, y, 0.1])
+            apple_pos_to_sample.append([x, y, 0.15])
 
     distractors_to_sample = ["pear", "bowl", "apple"]
     floor_texture_files_to_sample = [
@@ -152,7 +159,7 @@ def main(cfg):
         f"{ASSET_DIR}/floor/silver_wood.jpg",
     ]
 
-    for traj_idx in range(63, 75):
+    for traj_idx in range(75):
         try:
             real_traj_dict, _ = load_hdf5(
                 file_path=f"{DATA_DIR}/{real_folder}/{traj_idx}.h5",
@@ -227,7 +234,7 @@ def main(cfg):
                         {
                             "type": "custom",
                             "obj_name": "pear",
-                            "model_file": f"{ASSET_DIR}/objects/pear.obj",
+                            "model_file": f"{ASSET_DIR}/objects/pear.glb",
                             "pos": pear_pos_to_sample[
                                 np.random.choice(len(pear_pos_to_sample))
                             ],
@@ -240,7 +247,7 @@ def main(cfg):
                         {
                             "type": "custom",
                             "obj_name": "bowl",
-                            "model_file": f"{ASSET_DIR}/objects/bowl.obj",
+                            "model_file": f"{ASSET_DIR}/objects/bowl.glb",
                             "pos": bowl_pos_to_sample[
                                 np.random.choice(len(bowl_pos_to_sample))
                             ],
@@ -253,7 +260,7 @@ def main(cfg):
                         {
                             "type": "custom",
                             "obj_name": "apple",
-                            "model_file": f"{ASSET_DIR}/objects/apple.obj",
+                            "model_file": f"{ASSET_DIR}/objects/apple.glb",
                             "pos": apple_pos_to_sample[
                                 np.random.choice(len(apple_pos_to_sample))
                             ],
@@ -277,6 +284,7 @@ def main(cfg):
                 }
             )
             override_cfg(cfg, override)
+            print(cfg.env.scene_builder.distractor)
 
             pick_offset = np.zeros(3)
             place_offset = np.zeros(3)
@@ -410,7 +418,7 @@ def main(cfg):
                 # },
             }
             # Add override to the data_dict
-            data_dict["override"] = OmegaConf.to_container(override)
+            # data_dict["override"] = OmegaConf.to_container(override)
 
             os.makedirs(f"{DATA_DIR}/sim/{real_folder}", exist_ok=True)
             # if os.path.exists(f"{DATA_DIR}/sim/{traj_idx}_sim.h5"):

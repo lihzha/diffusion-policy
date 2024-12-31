@@ -189,7 +189,6 @@ class TabletopSceneBuilder(SceneBuilder):
             w = aabb[1, 1] - aabb[0, 1]
             h = aabb[1, 2] - aabb[0, 2]
             print(length, w, h)
-            breakpoint()
             self.scene_objects.append(distractor)
 
     def _get_table_material(self):
