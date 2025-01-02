@@ -64,7 +64,7 @@ class PatchEmbed1(nn.Module):
 
     def forward(self, x: torch.Tensor):
         y = self.conv(x)
-        y = einops.rearrange(y, "b c h w -> b (h  w) c")
+        y = einops.rearrange(y, "b c h w -> b (h  w) c").contiguous()
         return y
 
 
@@ -94,7 +94,7 @@ class PatchEmbed2(nn.Module):
 
     def forward(self, x: torch.Tensor):
         y = self.embed(x)
-        y = einops.rearrange(y, "b c h w -> b (h  w) c")
+        y = einops.rearrange(y, "b c h w -> b (h  w) c").contiguous()
         return y
 
 
@@ -218,7 +218,7 @@ class MultiViewPatchEmbed(nn.Module):
                 "(v b cs) p d -> b (cs v p) d",
                 v=self.num_views,
                 cs=self.img_cond_steps,
-            )
+            ).contiguous()
         else:
             return torch.cat(patch_embds, dim=0)  # (v b cs) p d
 
@@ -233,7 +233,7 @@ class MultiViewPatchEmbed(nn.Module):
                 "(v b cs) p d -> b (cs v p) d",
                 v=self.num_views,
                 cs=self.img_cond_steps,
-            )
+            ).contiguous()
         return y
 
 
@@ -251,15 +251,17 @@ class MultiHeadAttention(nn.Module):
         x: [batch, seq, embed_dim]
         """
         qkv = self.qkv_proj(x)
-        q, k, v = einops.rearrange(
-            qkv, "b t (k h d) -> b k h t d", k=3, h=self.num_head
-        ).unbind(1)
+        q, k, v = (
+            einops.rearrange(qkv, "b t (k h d) -> b k h t d", k=3, h=self.num_head)
+            .unbind(1)
+            .contiguous()
+        )
         # force flash/mem-eff attention, it will raise error if flash cannot be applied
         with torch.backends.cuda.sdp_kernel(enable_math=False):
             attn_v = torch.nn.functional.scaled_dot_product_attention(
                 q, k, v, dropout_p=0.0, attn_mask=attn_mask
             )
-        attn_v = einops.rearrange(attn_v, "b h t d -> b t (h d)")
+        attn_v = einops.rearrange(attn_v, "b h t d -> b t (h d)").contiguous()
         return self.out_proj(attn_v)
 
 
