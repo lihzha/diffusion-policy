@@ -51,6 +51,7 @@ dependencies = [
     "pydantic",
     "pyglet==1.5.29",
     "pre-commit>=4.0.1",
+    "objaverse"
 ]
 
 [tool.setuptools.packages.find]

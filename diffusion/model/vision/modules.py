@@ -40,7 +40,7 @@ class SpatialEmb(nn.Module):
         return f"weight: nn.Parameter ({self.weight.size()})"
 
     def forward(self, feat: torch.Tensor, prop: torch.Tensor):
-        feat = feat.transpose(1, 2).contiguous()
+        feat = feat.transpose(1, 2)
 
         if self.prop_dim > 0:
             repeated_prop = prop.unsqueeze(1).repeat(1, feat.size(1), 1)
@@ -66,7 +66,7 @@ class RandomShiftsAug:
             -1.0 + eps, 1.0 - eps, h + 2 * self.pad, device=x.device, dtype=x.dtype
         )[:h]
         arange = arange.unsqueeze(0).repeat(h, 1).unsqueeze(2)
-        base_grid = torch.cat([arange, arange.transpose(1, 0).contiguous()], dim=2)
+        base_grid = torch.cat([arange, arange.transpose(1, 0)], dim=2)
         base_grid = base_grid.unsqueeze(0).repeat(n, 1, 1, 1)
 
         shift = torch.randint(
@@ -547,7 +547,7 @@ if __name__ == "__main__":
     )
     img = torch.tensor(img[:, :, :3]).permute(2, 1, 0).float() / 255
     print(img.shape)
-    cj = ColorJitter(hue=0.03, brightness=0.2, contrast=0.1, saturation=0.1)
+    # cj = ColorJitter(hue=0.03, brightness=0.2, contrast=0.1, saturation=0.1)
     # cc = CropRandomizer(
     #     input_shape=(3, 640, 480),
     #     crop_height_pct=0.8,
@@ -555,8 +555,12 @@ if __name__ == "__main__":
     #     num_crops=1,
     #     pos_enc=False,
     # )
+    rr = RandomRotation(5, 1.0)
     for i in range(10):
         # cc_img = cc(img)
-        cj_img = cj(img)
-        cj_img = cj_img.squeeze().permute(2, 1, 0).numpy() * 255
-        cv2.imwrite(f"color_jitter_{i}.png", cj_img)
+        # cj_img = cj(img)
+        # cj_img = cj_img.squeeze().permute(2, 1, 0).numpy() * 255
+        # cv2.imwrite(f"color_jitter_{i}.png", cj_img)
+        rr_img = rr(img)
+        rr_img = rr_img.squeeze().permute(2, 1, 0).numpy() * 255
+        cv2.imwrite(f"random_rotation_{i}.png", rr_img)

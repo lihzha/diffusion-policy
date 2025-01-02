@@ -194,7 +194,7 @@ class VisionEncoder(nn.Module):
 
     def forward(self, rgb: dict, state=None, aggregate=True):
         for k in rgb.keys():
-            rgb[k] = einops.rearrange(rgb[k], "b cs c h w -> (b cs) c h w").contiguous()
+            rgb[k] = einops.rearrange(rgb[k], "b cs c h w -> (b cs) c h w")
             if self.aug:
                 rgb[k] = self.aug(rgb[k])
         # if aggregate:
@@ -229,20 +229,20 @@ class VisionEncoder(nn.Module):
                     "(v b cs) d-> b (cs v d)",
                     cs=self.img_cond_steps,
                     v=self.num_views,
-                ).contiguous()
+                )
                 return x
             x = torch.flatten(
                 x, start_dim=-2
             )  # (batch*img_cond_steps*num_views, emb_dim, h*w)
             x = torch.transpose(
                 x, 1, 2
-            ).contiguous()  # (batch*img_cond_steps*num_views, h*w, emb_dim)
+            )  # (batch*img_cond_steps*num_views, h*w, emb_dim)
             x = einops.rearrange(
                 x,
                 "(v b cs) hw d-> b hw (cs v d)",
                 cs=self.img_cond_steps,
                 v=self.num_views,
-            ).contiguous()
+            )
             if self.feature_aggregation == "compress":
                 x = x.mean(dim=1)
                 x = self.nn_compress(x)
@@ -262,14 +262,14 @@ class VisionEncoder(nn.Module):
                     "(v b cs) p d -> b (cs v p) d",
                     cs=self.img_cond_steps,
                     v=self.num_views,
-                ).contiguous()
+                )
         else:
             x = einops.rearrange(
                 x,
                 "(v b cs) p d -> b (cs v p) d",
                 cs=self.img_cond_steps,
                 v=self.num_views,
-            ).contiguous()
+            )
 
         if self.feature_aggregation == "spatial_emb":
             x = self.nn_compress.forward(x, state)
