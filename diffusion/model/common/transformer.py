@@ -272,7 +272,7 @@ class Transformer(nn.Module):
             # torch.nn.Transformer uses additive mask as opposed to multiplicative mask in minGPT
             # therefore, the upper triangle should be -inf and others (including diag) should be 0.
             sz = horizon
-            mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+            mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1).contiguous()
             mask = (
                 mask.float()
                 .masked_fill(mask == 0, float("-inf"))

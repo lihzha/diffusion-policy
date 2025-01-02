@@ -40,7 +40,7 @@ class SpatialEmb(nn.Module):
         return f"weight: nn.Parameter ({self.weight.size()})"
 
     def forward(self, feat: torch.Tensor, prop: torch.Tensor):
-        feat = feat.transpose(1, 2)
+        feat = feat.transpose(1, 2).contiguous()
 
         if self.prop_dim > 0:
             repeated_prop = prop.unsqueeze(1).repeat(1, feat.size(1), 1)
@@ -66,7 +66,7 @@ class RandomShiftsAug:
             -1.0 + eps, 1.0 - eps, h + 2 * self.pad, device=x.device, dtype=x.dtype
         )[:h]
         arange = arange.unsqueeze(0).repeat(h, 1).unsqueeze(2)
-        base_grid = torch.cat([arange, arange.transpose(1, 0)], dim=2)
+        base_grid = torch.cat([arange, arange.transpose(1, 0).contiguous()], dim=2)
         base_grid = base_grid.unsqueeze(0).repeat(n, 1, 1, 1)
 
         shift = torch.randint(

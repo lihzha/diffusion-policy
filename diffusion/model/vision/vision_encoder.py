@@ -236,7 +236,7 @@ class VisionEncoder(nn.Module):
             )  # (batch*img_cond_steps*num_views, emb_dim, h*w)
             x = torch.transpose(
                 x, 1, 2
-            )  # (batch*img_cond_steps*num_views, h*w, emb_dim)
+            ).contiguous()  # (batch*img_cond_steps*num_views, h*w, emb_dim)
             x = einops.rearrange(
                 x,
                 "(v b cs) hw d-> b hw (cs v d)",
