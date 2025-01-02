@@ -158,7 +158,7 @@ def main():
     initial_positions = []
 
     x_range = np.linspace(-0.4, -0.2, 3)
-    y_range = np.linspace(-0.2, 0.2, 5)
+    y_range = np.linspace(-0.1, 0.3, 5)
     for x in x_range:
         for y in y_range:
             for xx in x_range:
@@ -173,7 +173,7 @@ def main():
                     )
 
     for rnd in range(len(initial_positions)):
-        for trial in range(5):
+        for trial in range(3):
             p = initial_positions[rnd]
             env_cfg.env.manip_obj.pos = [float(v) for v in p[0][:3]]
             env_cfg.env.manip_obj.rot = [float(v) for v in p[0][3:]]

@@ -2,14 +2,12 @@ import os
 from typing import List
 
 import numpy as np
-import objaverse
 import sapien
 import sapien.render
 import torch
 from mani_skill.agents.multi_agent import MultiAgent
 from mani_skill.utils.building.ground import build_ground
 from mani_skill.utils.scene_builder import SceneBuilder
-from mani_skill.utils.structs import Actor
 from sapien.render import RenderMaterial
 from transforms3d.euler import euler2quat
 
@@ -96,6 +94,7 @@ class TabletopSceneBuilder(SceneBuilder):
         # self.table_width = aabb[1, 1] - aabb[0, 1]
         # self.table_height = aabb[1, 2] - aabb[0, 2]
         # print(self.table_length, self.table_width)
+        # breakpoint()
         # self.table_thickness = self.cfg.table.thickness
 
         floor_width = 100
@@ -116,80 +115,80 @@ class TabletopSceneBuilder(SceneBuilder):
         self.build_background()
 
         # 4. Build distractor objects
-        self.build_distractor()
+        # self.build_distractor()
 
-    def build_distractor(self):
-        for cfg in self.cfg.distractor:
-            if cfg.type == "objaverse":
-                lvis_annotations = objaverse.load_lvis_annotations()
-                uids_to_load = lvis_annotations[cfg.obj_name]
-                # processes = multiprocessing.cpu_count()
-                obj_dicts = objaverse.load_objects(
-                    uids=uids_to_load, download_processes=1
-                )
-                asset_path_list = list(obj_dicts.values())
-                rand_idx = torch.randperm(len(asset_path_list))
-                rand_idx = [0, 1, 2, 3]
-                model_files = [asset_path_list[idx] for idx in rand_idx]
-                model_files = np.concatenate(
-                    [model_files]
-                    * np.ceil(self.env.num_envs / len(asset_path_list)).astype(int)
-                )[: self.env.num_envs]
-                if (
-                    self.env.num_envs > 1
-                    and self.env.num_envs < len(asset_path_list)
-                    and self.env.reconfiguration_freq <= 0
-                ):
-                    print(
-                        """There are less parallel environments than total available models to sample.
-                        Not all models will be used during interaction even after resets unless you call env.reset(options=dict(reconfigure=True))
-                        or set reconfiguration_freq to be > 1."""
-                    )
-            elif cfg.type == "custom":
-                model_files = [cfg.model_file] * self.env.num_envs
-            else:
-                raise ValueError(f"Unknown object type for distractors: {cfg.type}")
-            _objs: List[Actor] = []
-            for i, model_file in enumerate(model_files):
-                # TODO: before official release we will finalize a metadata dataclass that these build functions should return.
-                builder = self.scene.create_actor_builder()
-                builder.set_scene_idxs([i])
+    # def build_distractor(self):
+    #     for cfg in self.cfg.distractor:
+    #         if cfg.type == "objaverse":
+    #             lvis_annotations = objaverse.load_lvis_annotations()
+    #             uids_to_load = lvis_annotations[cfg.obj_name]
+    #             # processes = multiprocessing.cpu_count()
+    #             obj_dicts = objaverse.load_objects(
+    #                 uids=uids_to_load, download_processes=1
+    #             )
+    #             asset_path_list = list(obj_dicts.values())
+    #             rand_idx = torch.randperm(len(asset_path_list))
+    #             rand_idx = [0, 1, 2, 3]
+    #             model_files = [asset_path_list[idx] for idx in rand_idx]
+    #             model_files = np.concatenate(
+    #                 [model_files]
+    #                 * np.ceil(self.env.num_envs / len(asset_path_list)).astype(int)
+    #             )[: self.env.num_envs]
+    #             if (
+    #                 self.env.num_envs > 1
+    #                 and self.env.num_envs < len(asset_path_list)
+    #                 and self.env.reconfiguration_freq <= 0
+    #             ):
+    #                 print(
+    #                     """There are less parallel environments than total available models to sample.
+    #                     Not all models will be used during interaction even after resets unless you call env.reset(options=dict(reconfigure=True))
+    #                     or set reconfiguration_freq to be > 1."""
+    #                 )
+    #         elif cfg.type == "custom":
+    #             model_files = [cfg.model_file] * self.env.num_envs
+    #         else:
+    #             raise ValueError(f"Unknown object type for distractors: {cfg.type}")
+    #         _objs: List[Actor] = []
+    #         for i, model_file in enumerate(model_files):
+    #             # TODO: before official release we will finalize a metadata dataclass that these build functions should return.
+    #             builder = self.scene.create_actor_builder()
+    #             builder.set_scene_idxs([i])
 
-                distractor_pose = sapien.Pose(
-                    p=cfg.pos,
-                    q=euler2quat(*cfg.rot),
-                )
+    #             distractor_pose = sapien.Pose(
+    #                 p=cfg.pos,
+    #                 q=euler2quat(*cfg.rot),
+    #             )
 
-                builder.add_nonconvex_collision_from_file(
-                    filename=model_file,
-                    scale=cfg.scale,
-                    pose=distractor_pose,
-                    # material=None,
-                )
-                builder.add_visual_from_file(
-                    filename=model_file,
-                    scale=cfg.scale,
-                    pose=distractor_pose,
-                    # material=None,
-                )
-                builder.initial_pose = distractor_pose
+    #             builder.add_nonconvex_collision_from_file(
+    #                 filename=model_file,
+    #                 scale=cfg.scale,
+    #                 pose=distractor_pose,
+    #                 # material=None,
+    #             )
+    #             builder.add_visual_from_file(
+    #                 filename=model_file,
+    #                 scale=cfg.scale,
+    #                 pose=distractor_pose,
+    #                 # material=None,
+    #             )
+    #             builder.initial_pose = distractor_pose
 
-                _objs.append(
-                    builder.build_kinematic(name=f"distractor-{cfg.obj_name}-{i}")
-                )
-                self.scene.remove_from_state_dict_registry(_objs[-1])
-            distractor = Actor.merge(_objs, name=f"distractor-{cfg.obj_name}")
-            self.scene.add_to_state_dict_registry(distractor)
-            aabb = (
-                distractor._objs[0]
-                .find_component_by_type(sapien.render.RenderBodyComponent)
-                .compute_global_aabb_tight()
-            )
-            length = aabb[1, 0] - aabb[0, 0]
-            w = aabb[1, 1] - aabb[0, 1]
-            h = aabb[1, 2] - aabb[0, 2]
-            print(length, w, h)
-            self.scene_objects.append(distractor)
+    #             _objs.append(
+    #                 builder.build_kinematic(name=f"distractor-{cfg.obj_name}-{i}")
+    #             )
+    #             self.scene.remove_from_state_dict_registry(_objs[-1])
+    #         distractor = Actor.merge(_objs, name=f"distractor-{cfg.obj_name}")
+    #         self.scene.add_to_state_dict_registry(distractor)
+    #         aabb = (
+    #             distractor._objs[0]
+    #             .find_component_by_type(sapien.render.RenderBodyComponent)
+    #             .compute_global_aabb_tight()
+    #         )
+    #         length = aabb[1, 0] - aabb[0, 0]
+    #         w = aabb[1, 1] - aabb[0, 1]
+    #         h = aabb[1, 2] - aabb[0, 2]
+    #         print(length, w, h)
+    #         self.scene_objects.append(distractor)
 
     def _get_table_material(self):
         from sapien.render import RenderTexture2D

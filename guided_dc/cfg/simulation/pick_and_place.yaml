@@ -36,18 +36,18 @@ env:
       pos: [0.04, -0.39, -0.105]
       rot: [0, 0, 0]
     distractor:
-      # - type: custom
-      #   obj_name: pear
-      #   model_file: ${oc.env:GDC_ASSETS_DIR}/objects/pear.glb
-      #   pos: [-0.1, 0.025, 0.3]
-      #   rot: [0,0,0]
-      #   scale: [0.05, 0.05, 0.05]
       - type: custom
-        obj_name: bowl
-        model_file: ${oc.env:GDC_ASSETS_DIR}/objects/bowl.glb
-        pos: [-0.3, 0.025, 0.1]
+        obj_name: pear
+        model_file: ${oc.env:GDC_ASSETS_DIR}/objects/pear.glb
+        pos: [-0.1, 0.025, 0.3]
         rot: [0,0,0]
-        scale: [0.01, 0.01, 0.01]
+        scale: [0.05, 0.05, 0.05]
+      # - type: custom
+      #   obj_name: bowl
+      #   model_file: ${oc.env:GDC_ASSETS_DIR}/objects/bowl.glb
+      #   pos: [-0.3, 0.025, 0.1]
+      #   rot: [0,0,0]
+      #   scale: [0.01, 0.01, 0.01]
       # - type: custom
       #   obj_name: apple
       #   model_file: ${oc.env:GDC_ASSETS_DIR}/objects/apple.glb

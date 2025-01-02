@@ -159,6 +159,10 @@ model:
 
         - _target_: diffusion.model.vision.modules.Normalize
 
+        - _target_: diffusion.model.vision.modules.RandomRotation
+          degrees: 5
+          p: 0.8
+
 ema:
   decay: 0.995
 

@@ -424,6 +424,7 @@ class RandEnv(BaseEnv):
         visual_material=None,
         scale=[1, 1, 1],
         mass=None,
+        kinematic=False,
     ):
         _objs = []
         for i in range(self.num_envs):
@@ -438,7 +439,10 @@ class RandEnv(BaseEnv):
             builder.initial_pose = sapien.Pose(q=euler2quat(0, 0, 0))
             if mass is not None:
                 builder._mass = mass
-            _objs.append(builder.build(name=f"{path}-{i}"))
+            if not kinematic:
+                _objs.append(builder.build(name=f"{path}-{i}"))
+            else:
+                _objs.append(builder.build_kinematic(name=f"{path}-{i}"))
             self.remove_from_state_dict_registry(_objs[-1])
         obj = Actor.merge(_objs, name=f"{path}")
         self.add_to_state_dict_registry(obj)
@@ -453,6 +457,7 @@ class RandEnv(BaseEnv):
         obj_name=None,
         scale=[1, 1, 1],
         mass=None,
+        kinematic=False,
     ):
         physic_material = sapien.Scene().create_physical_material(**physics)
         if visuals is not None:
@@ -461,17 +466,24 @@ class RandEnv(BaseEnv):
             visual_material = None
         if asset_type == "custom":
             return self._load_glb_assets(
-                filepath, physic_material, visual_material, scale, mass
+                filepath, physic_material, visual_material, scale, mass, kinematic
             )
         elif asset_type == "ai2thor":
-            return self._load_ai2thor_assets(obj_name, physic_material, visual_material)
+            return self._load_ai2thor_assets(
+                obj_name, physic_material, visual_material, kinetic=kinematic
+            )
         elif asset_type == "objaverse":
             return self._load_objaverse_assets(
-                obj_name, physic_material, visual_material, scale
+                obj_name, physic_material, visual_material, scale, kinetic=kinematic
             )
 
     def _load_objaverse_assets(
-        self, obj_name, material=None, visual_material=None, scale=[1, 1, 1]
+        self,
+        obj_name,
+        material=None,
+        visual_material=None,
+        scale=[1, 1, 1],
+        kinetic=False,
     ):
         lvis_annotations = objaverse.load_lvis_annotations()
         uids_to_load = lvis_annotations[obj_name]
@@ -489,7 +501,7 @@ class RandEnv(BaseEnv):
             and self.num_envs < len(asset_path_list)
             and self.reconfiguration_freq <= 0
         ):
-            print(
+            log.info(
                 """There are less parallel environments than total available models to sample.
                 Not all models will be used during interaction even after resets unless you call env.reset(options=dict(reconfigure=True))
                 or set reconfiguration_freq to be > 1."""
@@ -509,7 +521,9 @@ class RandEnv(BaseEnv):
                     filename=model_file, scale=scale, pose=obj_pose, material=material
                 )
             else:
-                print(f"Using default physical properties for the object {model_name}.")
+                log.info(
+                    f"Using default physical properties for the object {model_name}."
+                )
                 builder.add_convex_collision_from_file(
                     filename=model_file, scale=scale, pose=obj_pose
                 )
@@ -521,15 +535,22 @@ class RandEnv(BaseEnv):
                 material=visual_material,
             )
             builder.initial_pose = obj_pose
-
-            _objs.append(builder.build(name=f"{model_name}-{i}"))
+            if not kinetic:
+                _objs.append(builder.build(name=f"{model_name}-{i}"))
+            else:
+                _objs.append(builder.build_kinematic(name=f"{model_name}-{i}"))
             self.remove_from_state_dict_registry(_objs[-1])
         obj = Actor.merge(_objs, name=f"{obj_name}")
         self.add_to_state_dict_registry(obj)
         return obj, _objs
 
     def _load_ai2thor_assets(
-        self, obj_name, material=None, visual_material=None, scale=[1, 1, 1]
+        self,
+        obj_name,
+        material=None,
+        visual_material=None,
+        scale=[1, 1, 1],
+        kinetic=False,
     ):
         asset_path_list: list = get_obj_asset(obj_name)
         rand_idx = torch.randperm(len(asset_path_list))
@@ -542,7 +563,7 @@ class RandEnv(BaseEnv):
             and self.num_envs < len(asset_path_list)
             and self.reconfiguration_freq <= 0
         ):
-            print(
+            log.info(
                 """There are less parallel environments than total available models to sample.
                 Not all models will be used during interaction even after resets unless you call env.reset(options=dict(reconfigure=True))
                 or set reconfiguration_freq to be > 1."""
@@ -562,7 +583,9 @@ class RandEnv(BaseEnv):
                     filename=model_file, scale=scale, pose=obj_pose, material=material
                 )
             else:
-                print(f"Using default physical properties for the object {model_name}.")
+                log.info(
+                    f"Using default physical properties for the object {model_name}."
+                )
                 builder.add_convex_collision_from_file(
                     filename=model_file, scale=scale, pose=obj_pose
                 )
@@ -574,12 +597,41 @@ class RandEnv(BaseEnv):
                 material=visual_material,
             )
             builder.initial_pose = obj_pose
-
-            _objs.append(builder.build(name=f"{model_name}-{i}"))
+            if not kinetic:
+                _objs.append(builder.build(name=f"{model_name}-{i}"))
+            else:
+                _objs.append(builder.build_kinematic(name=f"{model_name}-{i}"))
             self.remove_from_state_dict_registry(_objs[-1])
         obj = Actor.merge(_objs, name=f"{obj_name}")
         self.add_to_state_dict_registry(obj)
         return obj, _objs
+
+    def build_distractor(self):
+        for cfg in self.cfg.distractor:
+            distractor, _ = self._load_assets(
+                asset_type=cfg.type, filepath=cfg.model_file, obj_name=cfg.obj_name
+            )
+            aabb = (
+                distractor._objs[0]
+                .find_component_by_type(sapien.render.RenderBodyComponent)
+                .compute_global_aabb_tight()
+            )
+            length = aabb[1, 0] - aabb[0, 0]
+            w = aabb[1, 1] - aabb[0, 1]
+            h = aabb[1, 2] - aabb[0, 2]
+            log.info(
+                f"Adding distractor '{cfg.obj_name}' with dimention: {length}, {w}, {h}"
+            )
+            # self.table_scene.scene_objects.append(distractor)
+            distractor.set_pose(
+                sapien.Pose(
+                    p=cfg.pos,
+                    q=euler2quat(*cfg.rot),
+                )
+            )
+
+    def randomly_load_distractor(self):
+        pass
 
     #############################################
     ########### For motion planning #############
@@ -606,7 +658,9 @@ class RandEnv(BaseEnv):
         has_collision = torch.linalg.norm(forces, dim=-1).sum(-1) > FORCE_THRESHOLD
         if has_collision.any():
             nonzero_env = [i.item() for i in has_collision.nonzero()]
-            print(f"************ Collision detected for {nonzero_env}! **************")
+            log.info(
+                f"************ Collision detected for {nonzero_env}! **************"
+            )
         self.set_state_dict(init_state)
         return has_collision
 

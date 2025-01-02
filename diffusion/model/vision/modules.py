@@ -473,6 +473,23 @@ class Normalize(nn.Module):
         return x
 
 
+class RandomRotation(nn.Module):
+    def __init__(self, degrees=5, p=0.8):
+        super().__init__()
+        self.degrees = degrees
+        self.p = p
+        self.rotation = torchvision.transforms.RandomRotation(degrees=degrees)
+
+    def forward(self, x):
+        if self.training:
+            if torch.rand(1) < self.p:
+                x = x / 255.0
+                x = self.rotation(x)
+                x = x * 255.0
+                return x
+        return x
+
+
 # test random shift
 if __name__ == "__main__":
     # from PIL import Image

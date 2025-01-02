@@ -4,12 +4,12 @@ import os
 import gymnasium as gym
 import hydra
 import numpy as np
+import omegaconf
 from omegaconf import OmegaConf
 from scipy.spatial.transform import Rotation as R
 
 from guided_dc.utils.hdf5_utils import save_dict_to_hdf5
 from guided_dc.utils.io_utils import load_hdf5, load_sim_hdf5, stack_videos_horizontally
-import omegaconf
 
 OmegaConf.register_resolver(
     "pi_op",
@@ -95,11 +95,10 @@ def step(env):
 
 
 def override_cfg(cfg, override):
-    
     def find_and_set_key(d, target_key, value):
         if not isinstance(d, omegaconf.dictconfig.DictConfig):
             return False
-        
+
         for key in d:
             if key == target_key:
                 d[key] = value
@@ -108,9 +107,10 @@ def override_cfg(cfg, override):
                 if find_and_set_key(d[key], target_key, value):
                     return True
         return False
-    
+
     for k, v in override.items():
         find_and_set_key(cfg, k, v)
+
 
 @hydra.main(
     config_path=os.path.join(os.getcwd(), "guided_dc/cfg/simulation"),
