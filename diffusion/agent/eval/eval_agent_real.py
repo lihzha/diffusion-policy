@@ -100,7 +100,7 @@ class EvalAgentReal(EvalAgent):
             prev_obs = obs
         if self.use_delta_actions:
             cur_state = self.unnormalize_obs(cond["state"].cpu().numpy())
-            action = self.unnormalized_delta_action(naction, cur_state)
+            action = self.unnormalize_delta_action(naction, cur_state)
         else:
             action = self.unnormalize_action(naction)
         print("Action:", action)
@@ -175,7 +175,7 @@ class EvalAgentReal(EvalAgent):
                     naction = samples[0, : self.act_steps]  # remove batch dimension
                 if self.use_delta_actions:
                     cur_state = self.unnormalize_obs(cond["state"].cpu().numpy())
-                    action = self.unnormalized_delta_action(naction, cur_state)
+                    action = self.unnormalize_delta_action(naction, cur_state)
                 else:
                     action = self.unnormalize_action(naction)
                 actions.append(action)

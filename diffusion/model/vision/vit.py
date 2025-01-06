@@ -251,11 +251,9 @@ class MultiHeadAttention(nn.Module):
         x: [batch, seq, embed_dim]
         """
         qkv = self.qkv_proj(x)
-        q, k, v = (
-            einops.rearrange(qkv, "b t (k h d) -> b k h t d", k=3, h=self.num_head)
-            .unbind(1)
-            
-        )
+        q, k, v = einops.rearrange(
+            qkv, "b t (k h d) -> b k h t d", k=3, h=self.num_head
+        ).unbind(1)
         # force flash/mem-eff attention, it will raise error if flash cannot be applied
         with torch.backends.cuda.sdp_kernel(enable_math=False):
             attn_v = torch.nn.functional.scaled_dot_product_attention(

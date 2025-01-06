@@ -127,7 +127,7 @@ class RandEnv(BaseEnv):
 
         # 1. Side camera
         assert isinstance(self.cam_mount, list)
-        camera_configs = self._camera_template(self.cfg.camera.sensor, "sensor")
+        sensor_camera_configs = self._camera_template(self.cfg.camera.sensor, "sensor")
 
         # 2. Wrist camera
         wrist_camera_cfg = self.cfg.camera.get("wrist_camera", None)
@@ -181,7 +181,7 @@ class RandEnv(BaseEnv):
         #     )
         # ]
         additional_confgs = []
-        return camera_configs + wrist_camera_configs + additional_confgs
+        return sensor_camera_configs + wrist_camera_configs + additional_confgs
 
     @property
     def _default_viewer_camera_configs(

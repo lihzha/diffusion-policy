@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from diffusion.agent.eval.eval_agent import EvalAgent
+from guided_dc.utils.pose_utils import quaternion_to_euler_xyz
 
 log = logging.getLogger(__name__)
 
@@ -26,12 +27,7 @@ def update(env_states, env_success, terminated, info, eval_step=0):
     return env_states, env_success
 
 
-def stepp(env):
-    """
-    Take a step through the environment with an action. Actions are automatically clipped to the action space.
-
-    If ``action`` is None, the environment will proceed forward in time without sending any actions/control signals to the agent
-    """
+def step_without_action(env):
     info = env.get_info()
     obs = env.get_obs(info)
     return (
@@ -128,15 +124,66 @@ class EvalAgentSim(EvalAgent):
                 # a = np.concatenate([a, a[..., -1:]], axis=1)
                 # a[..., -2:] = (a[..., -2:] + 1) * 0.02
                 # self.env.agent.robot.set_qpos(a)
-                # obs, info = stepp(self.env)
+                # obs, info = step_without_action(self.env)
                 # terminated = torch.tensor(0).to(torch.bool)
 
-                obs, _, _, _, _ = self.env.step(a)
+                new_obs, _, _, _, _ = self.env.step(a)
 
                 self.env.render()
-                obs = self.process_sim_observation(obs)
+                new_obs = self.process_sim_observation(new_obs)
 
+        return action, new_obs
+
+    def process_sim_observation(self, raw_obs):
+        if isinstance(raw_obs, dict):
+            raw_obs = [raw_obs]
+        joint_state = raw_obs[0]["agent"]["qpos"][:, :7].cpu().numpy()
+        gripper_state = raw_obs[0]["agent"]["qpos"][:, 7:8].cpu().numpy()
+        assert (gripper_state <= 0.04).all(), gripper_state
+        gripper_state = 1 - gripper_state / 0.04  # 1 is closed, 0 is open
+        if gripper_state > 0.2:
+            gripper_state = 1.0
+        else:
+            gripper_state = 0.0
+
+        eef_pos_quat = raw_obs[0]["extra"]["tcp_pose"].cpu().numpy()
+        # conver quaternion to euler angles
+        eef_pos_euler = np.zeros((eef_pos_quat.shape[0], 6))
+        eef_pos_euler[:, :3] = eef_pos_quat[:, :3]
+        eef_pos_euler[:, 3:] = quaternion_to_euler_xyz(eef_pos_quat[:, 3:])
+
+        images = {}
+        images["0"] = raw_obs[0]["sensor_data"]["sensor_0"]["rgb"].cpu().numpy()
+        images["2"] = raw_obs[0]["sensor_data"]["hand_camera"]["rgb"].cpu().numpy()
+
+        # wrist_img_resolution = (320, 240)
+        # wrist_img = np.zeros(
+        #     (len(images["2"]), wrist_img_resolution[1], wrist_img_resolution[0], 3)
+        # )
+        # for i in range(len(images["2"])):
+        #     wrist_img[i] = cv2.resize(images["2"][i], wrist_img_resolution)
+        # images["2"] = wrist_img
+
+        obs = {
+            "robot_state": {
+                "joint_positions": joint_state,
+                "gripper_position": gripper_state,
+                "cartesian_position": eef_pos_euler,
+            },
+            "image": images,
+        }
         return obs
+
+    def postprocess_sim_gripper_action(self, action):
+        action[..., -1] = -(action[..., -1] * 2 - 1)
+        # action[..., -1] = (action[..., -1] > 0).astype(np.float32) * 2 - 1
+        # print(action[..., -1])
+        # print((action[..., -1] > 0).sum())
+        # if (action[..., -1] > 0).sum() > 4:
+        #     action[..., -1] = 1
+        # else:
+        #     action[..., -1] = -1
+        return action
 
     def run(self):
         # Reset env before iteration starts
@@ -210,11 +257,11 @@ class EvalAgentSim(EvalAgent):
                 "Predicted action chunk dimensions:",
                 samples.shape,
             )
-            naction = samples[:, : self.act_steps]  # remove batch dimension
+            naction = samples[:, : self.act_steps]
             prev_obs = obs
         if self.use_delta_actions:
             cur_state = self.unnormalize_obs(cond["state"].cpu().numpy())
-            action = self.unnormalized_sim_delta_action(naction, cur_state)
+            action = self.unnormalize_delta_action(naction, cur_state)
             print("*using delta")
         else:
             action = self.unnormalize_action(naction)
@@ -313,7 +360,9 @@ class EvalAgentSim(EvalAgent):
                         .trajectories.cpu()
                         .numpy()
                     )
-                    naction = samples[:, : self.act_steps]  # remove batch dimension
+                    naction = samples[
+                        :, : self.act_steps
+                    ]  # (num_envs, act_steps, action_dim)
                     # naction = self.actions[
                     #     self.action_timestep[step] : self.action_timestep[step]
                     #     + self.act_steps
@@ -321,7 +370,7 @@ class EvalAgentSim(EvalAgent):
                     # print("Action chunk:", naction)
                 if self.use_delta_actions:
                     cur_state = self.unnormalize_obs(cond["state"].cpu().numpy())
-                    action = self.unnormalized_sim_delta_action(naction, cur_state)
+                    action = self.unnormalize_delta_action(naction, cur_state)
                     print("using delta")
                 else:
                     action = self.unnormalize_action(naction)
@@ -367,7 +416,7 @@ class EvalAgentSim(EvalAgent):
                     # a = np.concatenate([a, a[..., -1:]], axis=1)
                     # a[..., -2:] = (a[..., -2:] + 1) * 0.02
                     # self.env.agent.robot.set_qpos(a)
-                    # obs, info = stepp(self.env)
+                    # obs, info = step_without_action(self.env)
                     # terminated = torch.tensor(0).to(torch.bool)
 
                     obs, rew, terminated, truncated, info = self.env.step(a)
@@ -389,6 +438,8 @@ class EvalAgentSim(EvalAgent):
                     #     )
                     # )
                     # time.sleep(0.03)
+                if env_success:
+                    break
 
         except KeyboardInterrupt:
             print("Interrupted by user")

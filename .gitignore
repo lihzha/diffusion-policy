@@ -36,6 +36,7 @@ comparison/
 
 compare_sim_real_predictions.py
 plot.ipynb
+train.log
 
 !guided_dc/assets/**/*.png
 !set_path.sh

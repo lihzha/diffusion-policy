@@ -80,9 +80,10 @@ class DiffusionModel(nn.Module):
             )
             if "ema" in checkpoint:
                 self.load_state_dict(checkpoint["ema"], strict=True)
-                logging.info("Loaded SL-trained policy from %s", network_path)
             else:
                 self.load_state_dict(checkpoint["model"], strict=True)
+            logging.info("Loaded SL-trained policy from %s", network_path)
+        else:
             logging.info("Loaded RL-trained policy from %s", network_path)
         logging.info(
             f"Number of network parameters: {sum(p.numel() for p in self.parameters()) - sum(p.numel() for p in self.network.backbone.parameters())}"

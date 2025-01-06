@@ -542,25 +542,54 @@ if __name__ == "__main__":
 
     # Read the image
     img = cv2.imread(
-        "image_0.png",
+        "/n/fs/robot-data/guided-data-collection/image_0.png",
         cv2.IMREAD_UNCHANGED,
     )
-    img = torch.tensor(img[:, :, :3]).permute(2, 1, 0).float() / 255
+    img = torch.tensor(img[:, :, :3]).permute(2, 1, 0)
+    print(img.max(),img.min())
     print(img.shape)
-    # cj = ColorJitter(hue=0.03, brightness=0.2, contrast=0.1, saturation=0.1)
-    # cc = CropRandomizer(
-    #     input_shape=(3, 640, 480),
-    #     crop_height_pct=0.8,
-    #     crop_width_pct=0.8,
-    #     num_crops=1,
-    #     pos_enc=False,
-    # )
+    cj = ColorJitter(hue=0.12, brightness=0.2, contrast=0.2, saturation=0.2)
+    cc = CropRandomizer(
+        input_shape=(3, 640, 480),
+        crop_height_pct=0.92,
+        crop_width_pct=0.92,
+        num_crops=1,
+        pos_enc=False,
+    )
     rr = RandomRotation(5, 1.0)
+    gb = GaussianBlur(kernel_size=5, sigma=(0.1, 2.0), p=1.0)
     for i in range(10):
         # cc_img = cc(img)
         # cj_img = cj(img)
         # cj_img = cj_img.squeeze().permute(2, 1, 0).numpy() * 255
         # cv2.imwrite(f"color_jitter_{i}.png", cj_img)
-        rr_img = rr(img)
-        rr_img = rr_img.squeeze().permute(2, 1, 0).numpy() * 255
-        cv2.imwrite(f"random_rotation_{i}.png", rr_img)
+        rr_img = gb(rr(cc(cj(img))))
+        rr_img = rr_img.squeeze().permute(2, 1, 0).numpy()
+        print(rr_img.max(),rr_img.min())
+        cv2.imwrite(f"random_rotation_{i}_side.png", rr_img)
+    
+    # Read the image
+    img = cv2.imread(
+        "/n/fs/robot-data/guided-data-collection/image_2.png",
+        cv2.IMREAD_UNCHANGED,
+    )
+    img = torch.tensor(img[:, :, :3]).permute(2, 1, 0)
+    print(img.shape)
+    cj = ColorJitter(hue=0.12, brightness=0.2, contrast=0.2, saturation=0.2)
+    cc = CropRandomizer(
+        input_shape=(3, 640, 480),
+        crop_height_pct=0.92,
+        crop_width_pct=0.92,
+        num_crops=1,
+        pos_enc=False,
+    )
+    rr = RandomRotation(5, 1.0)
+    gb = GaussianBlur(kernel_size=5, sigma=(0.1, 2.0), p=1.0)
+    for i in range(10):
+        # cc_img = cc(img)
+        # cj_img = cj(img)
+        # cj_img = cj_img.squeeze().permute(2, 1, 0).numpy() * 255
+        # cv2.imwrite(f"color_jitter_{i}.png", cj_img)
+        rr_img = gb(rr(cc(cj(img))))
+        rr_img = rr_img.squeeze().permute(2, 1, 0).numpy()
+        cv2.imwrite(f"random_rotation_{i}_wrist.png", rr_img)

@@ -382,12 +382,15 @@ def process_real_dataset_with_sim_data(
         s1 = time.time()
         if "sim" in traj_path:
             print("Loading sim data")
-
             traj, camera_indices_raw = load_sim_hdf5_for_training(
                 traj_path,
                 action_keys=action_keys,
                 observation_keys=observation_keys,
                 load_image=save_image,
+            )
+            traj["action/gripper_position"] = 1 - (traj["action/gripper_position"] + 1) / 2
+            traj["observation/robot_state/gripper_position"] = 1 - (
+                traj["observation/robot_state/gripper_position"] / 0.04
             )
         else:
             traj, camera_indices_raw = load_hdf5(

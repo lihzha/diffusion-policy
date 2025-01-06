@@ -11,35 +11,7 @@ import hydra
 import numpy as np
 import torch
 
-from guided_dc.utils.pose_utils import quaternion_to_euler_xyz
-
 log = logging.getLogger(__name__)
-
-
-def process_obs(obs, obs_min, obs_max, ordered_obs_keys):
-    """concatenate and normalize obs"""
-    processed_obs = []
-    for i in range(len(ordered_obs_keys)):
-        o = obs["robot_state"][ordered_obs_keys[i]]
-        o = np.array(o)
-        if len(o.shape) == 1:
-            o = o.reshape(1, -1)
-        elif len(o.shape) == 0:
-            o = o.reshape(1, 1)
-        assert len(o.shape) == 2, o.shape
-        processed_obs.append(o)
-
-    processed_obs = np.concatenate(processed_obs, axis=1)
-    processed_obs = 2 * (processed_obs - obs_min) / (obs_max - obs_min + 1e-6) - 1
-    processed_obs = np.clip(processed_obs, -1, 1)
-    # If any of the processed_obs reach the limits, print a warning and show which obs reached the limits
-    # if np.any(np.abs(processed_obs[:, :-1]) == 1):
-    #     raise ValueError(
-    #         f"obs reached limits, {np.where(np.abs(processed_obs[:, :-1]) == 1)}"
-    #     )
-
-    # processed_obs[0,3] = np.abs(processed_obs[0,3])
-    return processed_obs
 
 
 class EvalAgent:
@@ -123,115 +95,76 @@ class EvalAgent:
         obs, info = self.env.reset()
         return obs
 
-    def process_sim_observation(self, raw_obs):
-        if isinstance(raw_obs, dict):
-            raw_obs = [raw_obs]
-        joint_state = raw_obs[0]["agent"]["qpos"][:, :7].cpu().numpy()
-        gripper_state = raw_obs[0]["agent"]["qpos"][:, 7:8].cpu().numpy()
-        assert (gripper_state <= 0.04).all(), gripper_state
-        gripper_state = 1 - gripper_state / 0.04  # 1 is closed, 0 is open
-        if gripper_state > 0.2:
-            gripper_state = 1.0
-        else:
-            gripper_state = 0.0
-
-        eef_pos_quat = raw_obs[0]["extra"]["tcp_pose"].cpu().numpy()
-        # conver quaternion to euler angles
-        eef_pos_euler = np.zeros((eef_pos_quat.shape[0], 6))
-        eef_pos_euler[:, :3] = eef_pos_quat[:, :3]
-        eef_pos_euler[:, 3:] = quaternion_to_euler_xyz(eef_pos_quat[:, 3:])
-
-        images = {}
-        images["0"] = raw_obs[0]["sensor_data"]["sensor_0"]["rgb"].cpu().numpy()
-        images["2"] = raw_obs[0]["sensor_data"]["hand_camera"]["rgb"].cpu().numpy()
-
-        # wrist_img_resolution = (320, 240)
-        # wrist_img = np.zeros(
-        #     (len(images["2"]), wrist_img_resolution[1], wrist_img_resolution[0], 3)
-        # )
-        # for i in range(len(images["2"])):
-        #     wrist_img[i] = cv2.resize(images["2"][i], wrist_img_resolution)
-        # images["2"] = wrist_img
-
-        obs = {
-            "robot_state": {
-                "joint_positions": joint_state,
-                "gripper_position": gripper_state,
-                "cartesian_position": eef_pos_euler,
-            },
-            "image": images,
-        }
-        return obs
-
     def unnormalize_action(self, naction):
         action = (naction + 1) * (
             self.action_max - self.action_min + 1e-6
         ) / 2 + self.action_min
         return action
 
-    def unnormalized_delta_action(self, naction, state):
-        action = (naction[:, :-1] + 1) * (
+    def unnormalize_delta_action(self, naction, state):
+        action = (naction[..., :-1] + 1) * (
             self.delta_max - self.delta_min + 1e-6
         ) / 2 + self.delta_min
-        action += state[:, -1, :-1]  # skip gripper
-        gripper_action = (naction[:, -1:] + 1) * (
+        if len(action.shape) == 2:
+            action += state[:, -1, :-1]  # skip gripper
+        else:
+            action += state[:, -1:, :-1]
+        gripper_action = (naction[..., -1:] + 1) * (
             self.action_max[-1] - self.action_min[-1] + 1e-6
         ) / 2 + self.action_min[-1]
         return np.concatenate([action, gripper_action], axis=-1)
 
-    def unnormalized_sim_delta_action(self, naction, state):
-        """
-        naction: (batch_size, horizon, action_dim)
-        state: (batch_size, cond_steps, obs_dim)
-        """
-        action = (naction[:, :, :-1] + 1) * (
-            self.delta_max - self.delta_min + 1e-6
-        ) / 2 + self.delta_min
-        action += state[:, -1:, :-1]  # skip gripper
-        gripper_action = (naction[:, :, -1:] + 1) * (
-            self.action_max[-1] - self.action_min[-1] + 1e-6
-        ) / 2 + self.action_min[-1]
-        return np.concatenate([action, gripper_action], axis=-1)
+    def normalize_obs(self, obs):
+        """concatenate and normalize obs"""
+        processed_obs = []
+        for i in range(len(self.ordered_obs_keys)):
+            o = obs["robot_state"][self.ordered_obs_keys[i]]
+            o = np.array(o)
+            if len(o.shape) == 1:
+                o = o.reshape(1, -1)
+            elif len(o.shape) == 0:
+                o = o.reshape(1, 1)
+            assert len(o.shape) == 2, o.shape
+            processed_obs.append(o)
+
+        processed_obs = np.concatenate(processed_obs, axis=1)
+        processed_obs = (
+            2 * (processed_obs - self.obs_min) / (self.obs_max - self.obs_min + 1e-6)
+            - 1
+        )
+        processed_obs = np.clip(processed_obs, -1, 1)
+        # If any of the processed_obs reach the limits, print a warning and show which obs reached the limits
+        # if np.any(np.abs(processed_obs[:, :-1]) == 1):
+        #     raise ValueError(
+        #         f"obs reached limits, {np.where(np.abs(processed_obs[:, :-1]) == 1)}"
+        #     )
+
+        # processed_obs[0,3] = np.abs(processed_obs[0,3])
+        return processed_obs
 
     def unnormalize_obs(self, state):
         return (state + 1) * (self.obs_max - self.obs_min + 1e-6) / 2 + self.obs_min
-
-    def postprocess_sim_gripper_action(self, action):
-        action[..., -1] = -(action[..., -1] * 2 - 1)
-        action[..., -1] = (action[..., -1] > 0).astype(np.float32) * 2 - 1
-        # print(action[..., -1])
-        # print((action[..., -1] > 0).sum())
-        if (action[..., -1] > 0).sum() > 4:
-            action[..., -1] = 1
-        else:
-            action[..., -1] = -1
-        return action
 
     def process_multistep_state(self, obs, prev_obs=None):
         if self.n_cond_step == 2:
             assert prev_obs
             ret = np.stack(
                 (
-                    process_obs(
-                        prev_obs, self.obs_min, self.obs_max, self.ordered_obs_keys
-                    ),
-                    process_obs(obs, self.obs_min, self.obs_max, self.ordered_obs_keys),
+                    self.normalize_obs(prev_obs),
+                    self.normalize_obs(obs),
                 ),
                 axis=1,
             )
         else:
             assert self.n_cond_step == 1
-            ret = process_obs(obs, self.obs_min, self.obs_max, self.ordered_obs_keys)[
-                :, None
-            ]
+            ret = self.normalize_obs(obs)[:, None]
         ret = torch.from_numpy(ret).float().to(self.device)
 
         # TODO: use config
-        # round gripper positionc
-        # if ret[..., -1] <= 0:
-        #     ret[..., -1] = -1
-        # else:
-        #     ret[..., -1] = 1
+        # round gripper position
+        # closed_gripper = ret[..., -1] <= 0
+        # ret[closed_gripper, -1] = -1
+        # ret[~closed_gripper, -1] = 1
         # ret[..., -1] = torch.round(ret[..., -1])
         return ret
 

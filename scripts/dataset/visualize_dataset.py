@@ -81,30 +81,30 @@ def load_dataset(dataset_folder):
     print("State max:", np.max(states, axis=0))
     print("State min:", np.min(states, axis=0))
 
-    # fig, ax = plt.subplots(4, 2, figsize=(10, 10))
-    # for i in range(8):
-    #     ax[i // 2, i % 2].plot(states[:, i], label=f"State {i}")
-    #     ax[i // 2, i % 2].plot(actions[:, i], label=f"Action {i}")
-    #     ax[i // 2, i % 2].legend()
-    # plt.savefig(os.path.join(dataset_folder, "actions_states.png"))
-    plt.plot(actions[:, -1], label="State 0")
-    plt.savefig(os.path.join(dataset_folder, "gripper.png"))
+    fig, ax = plt.subplots(4, 2, figsize=(10, 10))
+    for i in range(8):
+        ax[i // 2, i % 2].plot(states[:, i], label=f"State {i}")
+        ax[i // 2, i % 2].plot(actions[:, i], label=f"Action {i}")
+        ax[i // 2, i % 2].legend()
+    plt.savefig(os.path.join(dataset_folder, "actions_states.png"))
+    # plt.plot(actions[:, -1], label="State 0")
+    # plt.savefig(os.path.join(dataset_folder, "gripper.png"))
 
     # 2. Visualize images
-    # k = 0
-    # stack_videos_horizontally(
-    #     *[images[i][k : k + 1000].transpose(0, 2, 3, 1) for i in camera_indices],
-    #     os.path.join(dataset_folder, "real_images.mp4"),
-    #     bgr2rgb=bgr2rgb,
-    # )
     k = 0
     stack_videos_horizontally(
-        *[images[i][k : k + 5000].transpose(0, 2, 3, 1) for i in camera_indices],
+        *[images[i][k : k + 1000].transpose(0, 2, 3, 1) for i in camera_indices],
+        os.path.join(dataset_folder, "real_images.mp4"),
+        bgr2rgb=False,
+    )
+    # k = 0
+    stack_videos_horizontally(
+        *[images[i][-1000:].transpose(0, 2, 3, 1) for i in camera_indices],
         os.path.join(dataset_folder, "sim_images.mp4"),
-        bgr2rgb=bgr2rgb,
+        bgr2rgb=False,
     )
 
 
 if __name__ == "__main__":
-    dataset_folder = "data/jsg_jsg_2cam_192__sim_1.0"
+    dataset_folder = "data/jsg_jsg_2cam_192_sim_only_debug2_sim_1.0"
     load_dataset(dataset_folder)

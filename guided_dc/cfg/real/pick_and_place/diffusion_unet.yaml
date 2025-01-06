@@ -7,7 +7,7 @@ _target_: diffusion.agent.pretrain.train_il_agent.TrainILAgent
 
 job_id: 0
 gpu_id: 0
-dataset_name: jsg_jsg_${num_views}cam_${shape_meta.obs.rgb.shape[1]}__sim_0.2
+dataset_name: jsg_jsg_${num_views}cam_${shape_meta.obs.rgb.shape[1]}_sim_only_sim_1.0
 name: ${vis_model_name}_${dataset_name}
 logdir: ${oc.env:GDC_LOG_DIR}/${env}/${job_id}_${name}
 train_dataset_path: ${oc.env:GDC_DATA_DIR}/${dataset_name}/dataset.npz
@@ -28,8 +28,8 @@ horizon_steps: 16
 cond_steps: 1
 img_cond_steps: 1
 num_views: 2
-vis_model_name: resnet18 # vit_base_patch14_dinov2.lvd142m  # resnet18, custom_vit, vit_base_patch14_dinov2.lvd142m
-use_delta_actions: False
+vis_model_name: custom_vit  # resnet18, custom_vit, vit_base_patch14_dinov2.lvd142m
+use_delta_actions: false
 
 # Eval
 act_steps: 8
@@ -49,7 +49,7 @@ shape_meta:
     shape: ${[action_dim]}
 
 train:
-  n_epochs: 1000
+  n_epochs: 1501
   learning_rate: 1e-4
   weight_decay: 1e-6
   lr_scheduler:
@@ -63,7 +63,7 @@ train:
   store_gpu: False
   num_workers: 1
   persistent_workers: True
-  batch_size: 64
+  batch_size: 32
   # validation
   train_split: 1.0
   val_batch_size: ${train.batch_size}
@@ -102,7 +102,7 @@ model:
       img_size: ${shape_meta.obs.rgb.shape}
 
       # timm only
-      pretrained: true
+      pretrained: false
       frozen: false
       use_lora: false
       lora_rank: 8
@@ -119,7 +119,7 @@ model:
       use_large_patch: True
 
       feature_aggregation: # 'mean', 'concat', 'spatial_emb', 'compress', 'cls', 'avgpool', 'max'
-        # type: 'cls'
+        type: 'cls'
 
         # type: 'spatial_emb'
         # spatial_emb: 128
@@ -128,7 +128,7 @@ model:
         # type: 'compress'
         # visual_feature_dim: 128
 
-        type: 'avgpool'
+        # type: 'avgpool'
 
       aug:
         - _target_: diffusion.model.vision.modules.Resize
@@ -152,10 +152,10 @@ model:
           hue: 0.12
           p: 0.8
 
-        - _target_: diffusion.model.vision.modules.GaussianBlur
-          kernel_size: 5
-          sigma: [0.1, 2]
-          p: 0.5
+        # - _target_: diffusion.model.vision.modules.GaussianBlur
+        #   kernel_size: 5
+        #   sigma: [0.1, 2]
+        #   p: 0.5
 
         - _target_: diffusion.model.vision.modules.Normalize
 
@@ -172,7 +172,7 @@ train_dataset:
   dataset_path: ${train_dataset_path}
   normalization_stats_path: ${normalization_stats_path}
   horizon_steps: ${horizon_steps}
-  max_n_episodes: 401
+  max_n_episodes: 1500
   cond_steps: ${cond_steps}
   img_cond_steps: ${img_cond_steps}
   device: ${device}

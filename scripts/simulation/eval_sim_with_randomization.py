@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 sys.stdout = open(sys.stdout.fileno(), mode="w", buffering=1)
 sys.stderr = open(sys.stderr.fileno(), mode="w", buffering=1)
 
-CKPT_PATH = "ckpts/"
+CKPT_PATH = "log/tomato_plate"
 
 
 def main():
@@ -73,9 +73,9 @@ def main():
     job_id = args.job
     job_folder = next(f for f in os.listdir(CKPT_PATH) if f.startswith(job_id))
     job_folder = os.path.join(CKPT_PATH, job_folder)
-    cfg_path = os.path.join(job_folder, "config.yaml")
+    cfg_path = os.path.join(job_folder, ".hydra/config.yaml")
     cfg = OmegaConf.load(cfg_path)
-    ckpt_path = os.path.join(job_folder, f"state_{args.ckpt}.pt")
+    ckpt_path = os.path.join(job_folder, f"checkpoint/state_{args.ckpt}.pt")
 
     # add datetime to logdir
     cfg.logdir = os.path.join(
@@ -118,6 +118,12 @@ def main():
     env = gym.make(env_cfg.env.env_id, cfg=env_cfg.env)
 
     output_dir = env_cfg.record.output_dir
+
+    sub_dir = f"{job_id}/{args.ckpt}"
+    output_dir = os.path.join(output_dir, sub_dir)
+    os.makedirs(output_dir, exist_ok=True)
+    env_cfg.record.output_dir = output_dir
+
     render_mode = env_cfg.env.render_mode
     if output_dir and render_mode != "human":
         log.info(f"Recording environment episodes to: {output_dir}")
@@ -150,30 +156,34 @@ def main():
     #         viewer.paused = env_cfg.pause
 
     cfg.n_steps = 120
-    cfg.act_steps = 6
+    cfg.act_steps = 8
 
     cls = hydra.utils.get_class(cfg._target_)
     agent = cls(cfg, env)
 
     initial_positions = []
+    pick_pose = np.load("data/sim/tomato_plate_dec1/pick_obj_poses.npy")
+    place_pose = np.load("data/sim/tomato_plate_dec1/place_obj_poses.npy")
+    for idx in range(len(pick_pose)):
+        initial_positions.append((pick_pose[idx], place_pose[idx]))
 
-    x_range = np.linspace(-0.4, -0.2, 3)
-    y_range = np.linspace(-0.1, 0.3, 5)
-    for x in x_range:
-        for y in y_range:
-            for xx in x_range:
-                for yy in y_range:
-                    if x == xx and y == yy:
-                        continue
-                    initial_positions.append(
-                        (
-                            [x, y, 0.0, -1.57265, -0.0464526, 3.0965],
-                            [xx, yy, 0.01, 1.569, 2.9, -0.001066],
-                        )
-                    )
+    # x_range = np.linspace(-0.4, -0.2, 3)
+    # y_range = np.linspace(-0.0, 0.3, 3)
+    # for x in x_range:
+    #     for y in y_range:
+    #         for xx in x_range:
+    #             for yy in y_range:
+    #                 if x == xx and y == yy:
+    #                     continue
+    #                 initial_positions.append(
+    #                     (
+    #                         [x, y, 0.0, -1.57265, -0.0464526, 3.0965],
+    #                         [xx, yy, 0.01, 1.569, 2.9, -0.001066],
+    #                     )
+    #                 )
 
     for rnd in range(len(initial_positions)):
-        for trial in range(3):
+        for trial in range(1):
             p = initial_positions[rnd]
             env_cfg.env.manip_obj.pos = [float(v) for v in p[0][:3]]
             env_cfg.env.manip_obj.rot = [float(v) for v in p[0][3:]]
@@ -182,16 +192,20 @@ def main():
             # lighting = env_cfg.env.lighting[rnd]
             # env.unwrapped.set_ambient_light(lighting)
 
+            # obs, _ = env.reset()
+            # obs = agent.process_sim_observation(obs)
+            # for _ in range(400):
+            #     _, new_obs = agent.run_single_step(obs)
+            #     obs = new_obs
+            # break
+
             env_states = agent.run()
             print(env_states)
             env.flush_video()
 
             if output_dir and render_mode != "human":
-                video_dir = f"{job_id}/{args.ckpt}"
-                video_dir = os.path.join(output_dir, video_dir)
-                os.makedirs(video_dir, exist_ok=True)
                 video_dir = os.path.join(
-                    video_dir, f"{p[0][0]}_{p[0][1]}_{p[1][0]}_{p[1][1]}"
+                    output_dir, f"{p[0][0]}_{p[0][1]}_{p[1][0]}_{p[1][1]}"
                 )
                 os.makedirs(video_dir, exist_ok=True)
 

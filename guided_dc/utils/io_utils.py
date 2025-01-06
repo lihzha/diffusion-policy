@@ -98,46 +98,6 @@ def load_hdf5(
 
     return output, camera_indices_raw
 
-
-def load_sim_hdf5(
-    file_path,
-    action_keys=["joint_position", "gripper_position"],
-    observation_keys=["joint_positions", "gripper_position"],
-    load_image=True,
-    load_o=False,
-):
-    """also get the raw indices of camera images"""
-    keys_to_load = []
-    for key in action_keys:
-        keys_to_load.append(f"action/{key}")
-        if load_o:
-            keys_to_load.append(f"action_o/{key}")
-    for key in observation_keys:
-        keys_to_load.append(f"observation/robot_state/{key}")
-        if load_o:
-            keys_to_load.append(f"observation_o/robot_state/{key}")
-    if load_image:
-        keys_to_load.append("observation/image")
-        if load_o:
-            keys_to_load.append("observation_o/image")
-
-    output = {}
-    camera_indices_raw = []
-    h5_file = h5py.File(file_path, "r")
-    for key in keys_to_load:
-        if key in h5_file:
-            if "image" in key:
-                for cam in h5_file[key].keys():
-                    output[f"{key}/{cam}"] = h5_file[f"{key}/{cam}"][()]
-                    camera_indices_raw.append(int(cam))
-            else:
-                output[key] = h5_file[key][()]
-        else:
-            print(f"Key '{key}' not found in the HDF5 file.")
-    h5_file.close()
-    return output, camera_indices_raw
-
-
 def load_sim_hdf5_for_training(
     file_path,
     action_keys=["joint_position", "gripper_position"],
@@ -164,24 +124,26 @@ def load_sim_hdf5_for_training(
                 output[key] = h5_file[key][()]
         else:
             print(f"Key '{key}' not found in the HDF5 file.")
+    
+    if "pick_obj_pos" in h5_file:
+        output["pick_obj_pos"] = h5_file["pick_obj_pos"][()]
+        output["pick_obj_rot"] = h5_file["pick_obj_rot"][()]
+        output["place_obj_pos"] = h5_file["place_obj_pos"][()]
+        output["place_obj_rot"] = h5_file["place_obj_rot"][()]
 
     output["observation/timestamp/skip_action"] = np.zeros(
         len(output["action/gripper_position"])
     ).astype(bool)
 
-    output["action/gripper_position"] = 1 - (output["action/gripper_position"] + 1) / 2
-    output["observation/robot_state/gripper_position"] = 1 - (
-        output["observation/robot_state/gripper_position"] / 0.04
-    )
     camera_indices_raw = [0, 1, 2]
 
     # make sure to close h5 file
-    for obj in gc.get_objects():
-        if isinstance(obj, h5py.File):
-            try:
-                obj.close()
-            except Exception:
-                pass
+    # for obj in gc.get_objects():
+    #     if isinstance(obj, h5py.File):
+    #         try:
+    #             obj.close()
+    #         except Exception:
+    #             pass
     h5_file.close()
     return output, camera_indices_raw
 
