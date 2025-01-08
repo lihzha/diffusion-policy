@@ -4,12 +4,12 @@ import os
 import gymnasium as gym
 import hydra
 import numpy as np
-import omegaconf
 from omegaconf import OmegaConf
 from scipy.spatial.transform import Rotation as R
 
 from guided_dc.utils.hdf5_utils import save_dict_to_hdf5
 from guided_dc.utils.io_utils import load_hdf5, stack_videos_horizontally
+from guided_dc.utils.pose_utils import quaternion_to_euler_xyz
 
 OmegaConf.register_resolver(
     "pi_op",
@@ -73,11 +73,17 @@ def process_sim_observation(raw_obs):
     # assert (gripper_state <= 0.04).all(), gripper_state
     # gripper_state = 1 - gripper_state / 0.04
 
+    eef_pos_quat = raw_obs[0]["extra"]["tcp_pose"].cpu().numpy()
+    # conver quaternion to euler angles
+    eef_pos_euler = np.zeros((eef_pos_quat.shape[0], 6))
+    eef_pos_euler[:, :3] = eef_pos_quat[:, :3]
+    eef_pos_euler[:, 3:] = quaternion_to_euler_xyz(eef_pos_quat[:, 3:])
+
     images = {}
     images["0"] = raw_obs[0]["sensor_data"]["sensor_0"]["rgb"].cpu().numpy()[0]
     images["2"] = raw_obs[0]["sensor_data"]["hand_camera"]["rgb"].cpu().numpy()[0]
 
-    return joint_state, gripper_state, images
+    return joint_state, gripper_state, images, eef_pos_euler
 
 
 def step(env):
@@ -92,6 +98,7 @@ def step(env):
         obs,
         info,
     )
+
 
 @hydra.main(
     config_path=os.path.join(os.getcwd(), "guided_dc/cfg/simulation"),
@@ -110,9 +117,8 @@ def main(cfg):
         [-0.547, -0.527, -0.143]
     )  # Position of the robot base in the global frame
     base_orientation = np.array([0, 0, np.pi / 4])
-    
+
     for real_folder, traj_num in zip(real_folders, traj_nums):
-    
         pick_obj_poses = []
         place_obj_poses = []
 
@@ -120,7 +126,11 @@ def main(cfg):
             try:
                 real_traj_dict, _ = load_hdf5(
                     file_path=f"{DATA_DIR}/{real_folder}/{traj_idx}.h5",
-                    action_keys=["joint_position", "gripper_position"],
+                    action_keys=[
+                        "joint_position",
+                        "gripper_position",
+                        "cartesian_position",
+                    ],
                     observation_keys=[
                         "joint_positions",
                         "gripper_position",
@@ -161,6 +171,15 @@ def main(cfg):
 
             real_js = real_traj_dict["observation/robot_state/joint_positions"]
             real_gs = real_traj_dict["observation/robot_state/gripper_position"]
+            real_gs = (real_gs > 0.2).astype(np.float32)
+            real_gs = -real_gs * 2 + 1
+            # For the gripper position, we round values <0 to -1, and values >0 to 1
+            for i in range(len(real_gs)):
+                if real_gs[i] < 0:
+                    real_gs[i] = -1
+                else:
+                    real_gs[i] = 1
+
             actions = np.concatenate(
                 [
                     real_js,
@@ -168,17 +187,10 @@ def main(cfg):
                 ],
                 axis=1,
             )
-            actions[:, -1] = (actions[:, -1] > 0.2).astype(np.float32)
 
-            actions[:, -1] = -(actions[:, -1] * 2 - 1)
-            # For the gripper position, we round values <0 to -1, and values >0 to 1
-            for i in range(len(actions)):
-                if actions[i, -1] < 0:
-                    actions[i, -1] = -1
-                else:
-                    actions[i, -1] = 1
+            eef_actions = real_traj_dict["action/cartesian_position"]
+
             print(actions[:, -1])
-
 
             pick_offset = np.zeros(3)
             place_offset = np.zeros(3)
@@ -215,15 +227,18 @@ def main(cfg):
                 wrist_imgs = []
                 side_imgs = []
                 acts = []
+                eef_poses = []
 
                 success = False
                 for timestep, action in enumerate(actions):
-                    js, gs, img = process_sim_observation(obs)
+                    js, gs, img, eef_pose = process_sim_observation(obs)
                     jss.append(js)
                     gss.append(gs)
                     side_imgs.append(img["0"])
                     wrist_imgs.append(img["2"])
                     acts.append(action)
+                    eef_poses.append(eef_pose)
+
                     print(action)
                     if timestep == pick_obj_timestep:
                         tcp_pos = env.agent.tcp.pose.p.cpu().numpy().squeeze()
@@ -234,15 +249,14 @@ def main(cfg):
 
                     obs, rew, terminated, truncated, info = env.step(action)
                     success = success or terminated
-                    
-                    
+
                     # save_array_to_video("temp.mp4", wrist_imgs, fps=30, brg2rgb=False)
 
             pick_obj_pos = cfg.env.manip_obj.pos
             place_obj_pos = cfg.env.goal_obj.pos
             pick_obj_rot = cfg.env.manip_obj.rot
             place_obj_rot = cfg.env.goal_obj.rot
-            
+
             pick_obj_poses.append([*pick_obj_pos, *pick_obj_rot])
             place_obj_poses.append([*place_obj_pos, *place_obj_rot])
 
@@ -251,6 +265,7 @@ def main(cfg):
             wrist_imgs = np.array(wrist_imgs).astype(np.uint8)
             side_imgs = np.array(side_imgs).astype(np.uint8)
             acts = np.array(acts)
+            eef_poses = np.array(eef_poses)
 
             # 2. Save real observation trajectory
             # env.reset()
@@ -292,11 +307,13 @@ def main(cfg):
                     "robot_state": {
                         "joint_positions": jss,
                         "gripper_position": gss.squeeze(),
+                        "cartesian_position": eef_poses,
                     },
                 },
                 "action": {
                     "joint_position": acts[:, :-1],
                     "gripper_position": acts[:, -1],
+                    "cartesin_position": eef_actions,
                 },
                 "pick_obj_pos": pick_obj_pos,
                 "place_obj_pos": place_obj_pos,
@@ -321,8 +338,8 @@ def main(cfg):
             }
             # Add override to the data_dict
             # data_dict["override"] = OmegaConf.to_container(override)
-            
-            traj_folder = f"{DATA_DIR}/sim/{real_folder}"
+
+            traj_folder = f"{DATA_DIR}/sim_with_eef/{real_folder}"
 
             os.makedirs(traj_folder, exist_ok=True)
             # if os.path.exists(f"{DATA_DIR}/sim/{traj_idx}_sim.h5"):
@@ -338,9 +355,7 @@ def main(cfg):
                     traj_folder + f"/{traj_idx}_sim_failed.mp4",
                 )
             else:
-                save_dict_to_hdf5(
-                    traj_folder + f"/{traj_idx}_sim.h5", data_dict
-                )
+                save_dict_to_hdf5(traj_folder + f"/{traj_idx}_sim.h5", data_dict)
                 stack_videos_horizontally(
                     data_dict["observation"]["image"]["0"],
                     data_dict["observation"]["image"]["2"],

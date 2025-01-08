@@ -155,17 +155,17 @@ def main():
     #     if isinstance(viewer, sapien.utils.Viewer):
     #         viewer.paused = env_cfg.pause
 
-    cfg.n_steps = 120
+    cfg.n_steps = 80
     cfg.act_steps = 8
 
     cls = hydra.utils.get_class(cfg._target_)
     agent = cls(cfg, env)
 
     initial_positions = []
-    pick_pose = np.load("data/sim/tomato_plate_dec1/pick_obj_poses.npy")
-    place_pose = np.load("data/sim/tomato_plate_dec1/place_obj_poses.npy")
-    for idx in range(len(pick_pose)):
-        initial_positions.append((pick_pose[idx], place_pose[idx]))
+    pick_poses = np.load("data/sim/tomato_plate_dec1/pick_obj_poses.npy")
+    place_poses = np.load("data/sim/tomato_plate_dec1/place_obj_poses.npy")
+    # for idx in range(len(pick_poses)):
+    #     initial_positions.append((pick_poses[idx], place_poses[idx]))
 
     # x_range = np.linspace(-0.4, -0.2, 3)
     # y_range = np.linspace(-0.0, 0.3, 3)
@@ -182,9 +182,24 @@ def main():
     #                     )
     #                 )
 
-    for rnd in range(len(initial_positions)):
-        for trial in range(1):
-            p = initial_positions[rnd]
+    for rnd in range(len(pick_poses)):
+        initial_positions = []
+        initial_positions.append((pick_poses[rnd], place_poses[rnd]))
+        pick_pose, place_pose = pick_poses[rnd], place_poses[rnd]
+        for _ in range(3):
+            new_pick_pose = pick_pose + np.concatenate(
+                [np.random.uniform(-0.05, 0.05, size=2), [0, 0, 0, 0]]
+            )
+            new_place_pose = place_pose + np.concatenate(
+                [np.random.uniform(-0.05, 0.05, size=2), [0, 0, 0, 0]]
+            )
+
+            initial_positions.append((new_pick_pose, new_place_pose))
+        for trial in range(len(initial_positions)):
+            p = initial_positions[trial]
+            # for rnd in range(len(initial_positions)):
+            # for trial in range(1):
+            # p = initial_positions[rnd]
             env_cfg.env.manip_obj.pos = [float(v) for v in p[0][:3]]
             env_cfg.env.manip_obj.rot = [float(v) for v in p[0][3:]]
             env_cfg.env.goal_obj.pos = [float(v) for v in p[1][:3]]
@@ -198,17 +213,22 @@ def main():
             #     _, new_obs = agent.run_single_step(obs)
             #     obs = new_obs
             # break
+            if output_dir and render_mode != "human":
+                if trial == 0:
+                    video_dir = os.path.join(
+                        output_dir, f"{p[0][0]}_{p[0][1]}_{p[1][0]}_{p[1][1]}"
+                    )
+                    # if os.path.exists(video_dir):
+                    #     break
+                    # else:
+                    #     os.makedirs(video_dir, exist_ok=False)
+                    os.makedirs(video_dir, exist_ok=True)
 
             env_states = agent.run()
             print(env_states)
             env.flush_video()
 
             if output_dir and render_mode != "human":
-                video_dir = os.path.join(
-                    output_dir, f"{p[0][0]}_{p[0][1]}_{p[1][0]}_{p[1][1]}"
-                )
-                os.makedirs(video_dir, exist_ok=True)
-
                 # Save the video
                 video_name = (
                     f"{env_states['success']}_{trial}.mp4".replace("[", "")

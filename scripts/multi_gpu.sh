@@ -18,6 +18,7 @@ module load cudatoolkit/12.4
 # Parameter configurations
 CONFIGS=(
   "job_id=$SLURM_JOB_ID"
+  "dataset_name=/n/fs/robot-data/guided-data-collection/data/jsg_jsg_2cam_192_no_offset_sim_1.0"
 )
 
 # GPU Check
@@ -36,4 +37,4 @@ export MASTER_PORT=$(find_free_port)
 
 
 # Run script with selected configuration using torchrun
-HYDRA_FULL_ERROR=1 torchrun --nnodes=1 --nproc_per_node=2 --rdzv_id=100 --rdzv_backend=c10d --standalone --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT scripts/run.py ${CONFIGS[0]}
+HYDRA_FULL_ERROR=1 torchrun --nnodes=1 --nproc_per_node=2 --rdzv_id=100 --rdzv_backend=c10d --standalone --rdzv_endpoint=$MASTER_ADDR:$MASTER_PORT scripts/run.py ${CONFIGS}
