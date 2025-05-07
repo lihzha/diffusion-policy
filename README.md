@@ -1,10 +1,10 @@
-# Guided Data Collection
+# Diffusion Policy for Robot Policy Learning
 
 ## Installation
 
 1. Clone the repository
 ```console
-git clone --recurse-submodules git@github.com:irom-lab/guided-data-collection.git
+git clone --recurse-submodules git@github.com:lihzha/diffusion-policy.git
 ```
 
 2. Install core dependencies and the maniskill submodule with a conda environment on a Linux machine with a Nvidia GPU.
